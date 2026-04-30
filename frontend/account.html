@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ru" data-theme="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ИС Библиотеки | Кабинет</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body data-page="account">
+    <header class="topbar shadow-sm">
+        <div class="container-fluid py-3 d-flex flex-column flex-lg-row align-items-lg-center gap-3">
+            <div class="d-flex align-items-center justify-content-between w-100 w-lg-auto">
+                <h1 class="m-0 app-title">Library IS</h1>
+                <button id="themeToggleBtn" class="btn btn-sm btn-outline-light d-lg-none" type="button">Тема</button>
+            </div>
+
+            <nav class="nav nav-pills nav-fill nav-compact flex-grow-1" id="mainNav">
+                <a class="nav-link" href="/dashboard" data-page="dashboard">Дашборд</a>
+                <a class="nav-link" href="/books" data-page="books">Книги</a>
+                <a class="nav-link" href="/branches" data-page="branches">Филиалы</a>
+                <a class="nav-link" href="/account" data-page="account">Кабинет</a>
+                <a class="nav-link" href="/reports" data-page="reports" data-admin-only>Отчеты</a>
+            </nav>
+
+            <button id="themeToggleBtnDesktop" class="btn btn-sm btn-outline-light d-none d-lg-inline-flex" type="button">
+                Сменить тему
+            </button>
+        </div>
+    </header>
+
+    <main class="container-fluid main-content">
+        <h2 class="h3 page-title mb-3">Личный кабинет</h2>
+
+        <div class="card section-card mb-3">
+            <div class="card-body" id="accountProfile"></div>
+        </div>
+
+        <div class="card section-card mb-3">
+            <div class="card-body">
+                <h3 class="h5 mb-3">Запросы на выдачу/возврат</h3>
+                <div class="table-responsive">
+                    <table class="table table-striped align-middle" id="accountRequestsTable">
+                        <thead>
+                            <tr>
+                                <th>Книга</th>
+                                <th>Филиал</th>
+                                <th>Тип запроса</th>
+                                <th>Статус</th>
+                                <th>Дата</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card section-card mb-3" data-admin-only>
+            <div class="card-body">
+                <h3 class="h5 mb-3">Ожидающие одобрения запросы</h3>
+                <div class="table-responsive">
+                    <table class="table table-striped align-middle" id="pendingRequestsTable">
+                        <thead>
+                            <tr>
+                                <th>Студент</th>
+                                <th>Книга</th>
+                                <th>Филиал</th>
+                                <th>Тип</th>
+                                <th>Дата</th>
+                                <th class="text-end">Действия</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="card section-card">
+            <div class="card-body">
+                <h3 class="h5 mb-3">История выдач</h3>
+                <div class="table-responsive">
+                    <table class="table table-striped align-middle" id="accountLoansTable">
+                        <thead>
+                            <tr>
+                                <th>Книга</th>
+                                <th>Филиал</th>
+                                <th>Факультет</th>
+                                <th>Дата выдачи</th>
+                                <th>Статус</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div class="position-fixed top-0 end-0 p-3 toast-zone">
+        <div id="appToast" class="toast align-items-center border-0" role="alert" aria-live="assertive" aria-atomic="true">
+            <div class="d-flex">
+                <div id="appToastBody" class="toast-body"></div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/static/app.js"></script>
+</body>
+</html>
