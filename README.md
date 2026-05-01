@@ -1,188 +1,234 @@
-﻿# Информационная система библиотеки (PostgreSQL + PLpgSQL + FastAPI + MPA)
+# Информационная система библиотеки
 
-Проект переделан в **вариант 3**:
-- хранение данных в **PostgreSQL**;
-- администрирование через **pgAdmin 4**;
-- фронтенд в формате **многостраничного приложения (MPA)**: отдельные страницы для каждого раздела.
+Курсовой проект: информационная система библиотеки на **PostgreSQL + PL/pgSQL + FastAPI + HTML/CSS/JavaScript**.
 
-## 1) Стек и обоснование
-
-- **БД:** PostgreSQL 16 + PL/pgSQL
-- **Клиент БД:** pgAdmin 4
-- **Backend/API:** Python + FastAPI + psycopg
-- **Frontend:** HTML5 + CSS3 + JavaScript + Bootstrap 5
-
-Почему FastAPI оставлен:
-- быстрый REST-слой и валидация данных через Pydantic;
-- чистая интеграция с PostgreSQL (`psycopg`);
-- минимальный объем кода для CRUD + отчетов + обработка ошибок триггеров.
-
-## 2) Что реализовано по ТЗ
-
-### База данных и PL/pgSQL
-
-Таблицы:
-- `books`
-- `authors`
-- `book_authors`
-- `publishers`
-- `branches`
-- `faculties`
-- `inventory`
-- `book_faculty`
-- `app_users`
-- `book_loans`
-- `loan_requests`
-
-Реализованные объекты:
-1. Функция `get_book_count_in_branch(p_branch_name, p_book_title)`.
-2. Процедура `get_faculties_by_book(p_book_title, p_branch_name)` (через `refcursor`).
-3. Аналог пакета `library_mgmt` в PostgreSQL:
-   - схема `library_mgmt`;
-   - функции `library_mgmt.add_or_update_book(...)` и `library_mgmt.add_or_update_branch(...)`.
-4. Триггер `trg_branch_delete` с пользовательской ошибкой (аналог `ex_cant_delete_branch`): запрещает удалять филиал с книгами.
-5. Триггер `trg_cascade_inventory`: каскадно удаляет связанные записи при удалении книги.
-
-### REST API
-
-Обязательные endpoint’ы:
-- `GET /api/books/count?branch=...&title=...`
-- `GET /api/books/faculties?title=...&branch=...`
-- `POST /api/books`
-- `POST /api/branches`
-- `DELETE /api/books/{id}`
-- `DELETE /api/branches/{id}`
-
-Дополнительные endpoint’ы для UI:
-- `GET /api/stats`
-- `GET /api/books` (фильтры: `title`, `author`, `publisher`, `year`)
-- `GET /api/books/options`
-- `GET /api/books/{book_id}/availability`
-- `GET /api/books/top-issued?limit=10`
-- `GET /api/branches`
-- `GET /api/branches/options`
-- `GET /api/branches/{id}/inventory`
-- `POST /api/auth/register`
-- `POST /api/auth/login`
-- `GET /api/auth/me`
-- `GET /api/loan-requests/my`
-- `GET /api/loan-requests/pending`
-- `POST /api/loan-requests`
-- `POST /api/loan-requests/{id}/approve`
-- `GET /api/reports/book-students?book_id=...`
-
-### Frontend (многостраничный)
-
-Отдельные страницы:
-- `/dashboard` — статистика + быстрый поиск
-- `/books` — таблица книг, фильтры, add/edit/delete
-- `/branches` — филиалы, add/edit/delete, просмотр книг и аналитики
-- `/reports` — отчет книга+филиал + самые выдаваемые книги
-- `/account` — кабинет студента и администратора библиотеки
-
-Дополнительно:
-- адаптивная верстка;
-- светлая/темная тема;
-- уведомления об ошибках API;
-- понятная ошибка при запрете удаления филиала триггером.
-
-## 3) Структура проекта
+Приложение запускается через Docker Compose и доступно по адресу:
 
 ```text
-.
-├─ backend/
-│  ├─ app/
-│  │  ├─ config.py
-│  │  ├─ database.py
-│  │  ├─ main.py
-│  │  └─ schemas.py
-│  ├─ .env.example
-│  ├─ Dockerfile
-│  └─ requirements.txt
-├─ db/
-│  └─ init/
-│     ├─ 01_schema.sql
-│     ├─ 02_plsql.sql
-│     └─ 03_seed.sql
-├─ frontend/
-│  ├─ index.html
-│  ├─ dashboard.html
-│  ├─ books.html
-│  ├─ branches.html
-│  ├─ reports.html
-│  ├─ styles.css
-│  └─ app.js
-├─ docs/
-│  └─ screenshots/
-│     └─ README.md
-└─ docker-compose.yml
+http://localhost:8000
 ```
 
-## 4) Запуск через Docker Compose
+## Стек
 
-### Шаг 1. Запуск
+- **База данных:** PostgreSQL 16
+- **Процедурная логика БД:** PL/pgSQL
+- **Backend/API:** FastAPI + psycopg
+- **Frontend:** HTML5, CSS3, JavaScript, Bootstrap 5
+- **Администрирование БД:** pgAdmin 4
+- **Запуск:** Docker Compose
+- **PWA:** manifest + service worker + иконка приложения
+
+## Реализованные роли
+
+В системе предусмотрены три уровня доступа:
+
+- **Гость** — просматривает дашборд, список книг, подробную информацию о книге и филиалы.
+- **Студент** — регистрируется, входит в систему, создает заявки на получение/возврат книги и видит историю выдач в личном кабинете.
+- **Администратор библиотеки** — управляет книгами, филиалами, факультетами, подтверждает заявки студентов и просматривает отчеты.
+
+Тестовые учетные записи:
+
+```text
+Администратор:
+admin@example.com
+admin123
+
+Студент:
+student@example.com
+student123
+```
+
+## Реализованные пункты ТЗ
+
+1. Для указанного филиала считается количество экземпляров указанной книги.
+   - API: `GET /api/books/count?branch=...&title=...`
+   - PL/pgSQL: `get_book_count_in_branch(...)`
+
+2. Для указанной книги считается количество факультетов, на которых она используется в указанном филиале, и выводятся названия факультетов.
+   - API: `GET /api/books/faculties?title=...&branch=...`
+   - PL/pgSQL: `get_faculties_by_book(...)`
+
+3. Реализовано добавление и изменение информации о книгах.
+   - Страница: `/books`
+   - API: `POST /api/books`
+   - Доступ: администратор библиотеки
+
+4. Реализовано добавление и изменение информации о филиалах.
+   - Страница: `/branches`
+   - API: `POST /api/branches`
+   - Доступ: администратор библиотеки
+
+5. Разработаны триггеры на пользовательские исключительные ситуации.
+   - `trg_branch_delete` запрещает удалять филиал, если в нем есть книги.
+   - `trg_cascade_inventory` удаляет связанные записи инвентаря при удалении книги.
+
+Дополнительно реализовано:
+
+- регистрация и вход студентов;
+- личный кабинет;
+- заявки на выдачу и возврат книг;
+- подтверждение заявок администратором;
+- отчет по количеству студентов, которым выдавалась конкретная книга;
+- отчет “Самые выдаваемые книги”;
+- подробный просмотр книги для гостя и студента;
+- светлая/темная тема;
+- PWA-установка приложения.
+
+## Структура БД
+
+Основные таблицы:
+
+- `books` — книги;
+- `authors` — авторы;
+- `book_authors` — связь книг и авторов;
+- `publishers` — издательства;
+- `branches` — филиалы;
+- `faculties` — факультеты;
+- `inventory` — количество экземпляров книг по филиалам;
+- `book_faculty` — использование книги факультетами в конкретном филиале;
+- `app_users` — пользователи системы;
+- `book_loans` — история фактических выдач;
+- `loan_requests` — заявки студентов на получение/возврат.
+
+## Основные страницы
+
+- `/dashboard` — статистика и быстрый поиск книг.
+- `/books` — список книг, фильтрация, подробный просмотр, выдача по заявке, админское добавление/редактирование/удаление.
+- `/branches` — список филиалов, инвентарь филиала, аналитика по книге и факультетам, управление факультетами.
+- `/reports` — отчеты администратора.
+- `/account` — личный кабинет студента и рабочий кабинет администратора для подтверждения заявок.
+
+## REST API
+
+Основные endpoint’ы:
+
+```text
+GET  /api/health
+GET  /api/stats
+
+GET  /api/books
+GET  /api/books/options
+GET  /api/books/{book_id}/availability
+GET  /api/books/count
+GET  /api/books/faculties
+GET  /api/books/top-issued
+POST /api/books
+DELETE /api/books/{book_id}
+
+GET  /api/branches
+GET  /api/branches/options
+GET  /api/branches/{branch_id}/inventory
+POST /api/branches
+DELETE /api/branches/{branch_id}
+
+GET  /api/faculties
+POST /api/faculties
+
+POST /api/auth/register
+POST /api/auth/login
+GET  /api/auth/me
+
+POST /api/loan-requests
+GET  /api/loan-requests/my
+GET  /api/loan-requests/pending
+POST /api/loan-requests/{request_id}/approve
+
+GET  /api/loans/my
+GET  /api/reports/book-students
+```
+
+Для запросов, требующих авторизации, frontend передает заголовок:
+
+```text
+X-User-Id: <id пользователя>
+```
+
+## Запуск через Docker
+
+Запустить проект:
+
 ```bash
 docker compose up --build
 ```
 
-### Шаг 2. Адреса сервисов
-- Веб-приложение + API: `http://localhost:8000`
-- Swagger API: `http://localhost:8000/docs`
-- pgAdmin 4: `http://localhost:5050`
+Адреса:
 
-### Шаг 3. Логин в pgAdmin
-- Email: `admin@example.com`
-- Password: `admin123`
+```text
+Приложение: http://localhost:8000
+Swagger API:  http://localhost:8000/docs
+pgAdmin:     http://localhost:5050
+```
 
-### Шаг 4. Подключение сервера в pgAdmin
-В pgAdmin создайте новый Server:
-- Host: `postgres` (если pgAdmin в том же docker-compose)
-- Port: `5432`
-- Maintenance DB: `library_db`
-- Username: `library`
-- Password: `library123`
+Доступ к pgAdmin в браузере:
 
-Если подключаетесь к PostgreSQL с хоста (вне docker-сети), используйте:
-- Host: `localhost`
-- Port: `5432`
+```text
+Email:    admin@example.com
+Password: admin123
+```
 
-## 5) Запуск без Docker
+Подключение сервера PostgreSQL внутри Docker pgAdmin:
 
-1. Установить PostgreSQL и создать БД `library_db`.
-2. Выполнить SQL-скрипты по порядку:
-   - `db/init/01_schema.sql`
-   - `db/init/02_plsql.sql`
-   - `db/init/03_seed.sql`
-3. В `backend` создать `.env` на основе `.env.example`.
-4. Установить зависимости:
+```text
+Host: postgres
+Port: 5432
+Maintenance database: library_db
+Username: pgadmin_user
+Password: pgadmin123
+```
+
+Подключение через установленное приложение pgAdmin на Windows:
+
+```text
+Host: 127.0.0.1
+Port: 5432
+Maintenance database: library_db
+Username: pgadmin_user
+Password: pgadmin123
+```
+
+## Запуск без Docker
+
+1. Установить PostgreSQL.
+2. Создать БД `library_db`.
+3. Выполнить SQL-скрипты из `db/init` по порядку:
+
+```text
+01_schema.sql
+02_plsql.sql
+03_seed.sql
+04_auth_migration.sql
+05_loan_requests_migration.sql
+```
+
+4. Создать файл `backend/.env` на основе `backend/.env.example`.
+5. Установить зависимости:
+
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
-5. Запустить backend:
+
+6. Запустить backend:
+
 ```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-6. Открыть:
-- `http://localhost:8000/dashboard`
 
-## 6) Примеры API-запросов
+## PWA
 
-### Роли и тестовые пользователи
+Приложение подключено как PWA:
 
-В системе есть три уровня доступа:
-- **Гость** — просматривает книги, филиалы, статистику и отчеты.
-- **Клиент / студент** — может брать книгу, после чего запись появляется в личном кабинете.
-- **Администратор / библиотекарь** — управляет книгами, филиалами и факультетами.
+- manifest: `/manifest.webmanifest`;
+- service worker: `/sw.js`;
+- иконка: `/static/icons/icon.svg`;
+- стартовая страница: `/dashboard`.
 
-Тестовые учетные записи:
-- Администратор: `admin@example.com` / `admin123`
-- Студент: `student@example.com` / `student123`
+После открытия `http://localhost:8000` браузер может предложить установить приложение. В Chrome установка обычно доступна через кнопку в адресной строке или меню `Установить приложение`.
 
-Для запросов, требующих авторизации, передается заголовок `X-User-Id`.
-В UI он устанавливается автоматически после входа.
+## Примеры API-запросов
 
-### Добавить/обновить книгу
+Добавить или изменить книгу:
+
 ```bash
 curl -X POST http://localhost:8000/api/books \
   -H "Content-Type: application/json" \
@@ -198,17 +244,14 @@ curl -X POST http://localhost:8000/api/books \
   }'
 ```
 
-### Количество экземпляров
+Посчитать экземпляры книги в филиале:
+
 ```bash
 curl "http://localhost:8000/api/books/count?branch=Центральный%20филиал&title=Чистый%20код"
 ```
 
-### Попытка удаления филиала с книгами (получите сообщение от триггера)
-```bash
-curl -X DELETE http://localhost:8000/api/branches/1 -H "X-User-Id: 1"
-```
+Создать заявку на выдачу книги:
 
-### Создать заявку на выдачу книги
 ```bash
 curl -X POST http://localhost:8000/api/loan-requests \
   -H "Content-Type: application/json" \
@@ -216,7 +259,8 @@ curl -X POST http://localhost:8000/api/loan-requests \
   -d '{"book_id":1,"branch_id":1,"request_type":"take"}'
 ```
 
-### Создать заявку на возврат книги
+Создать заявку на возврат книги:
+
 ```bash
 curl -X POST http://localhost:8000/api/loan-requests \
   -H "Content-Type: application/json" \
@@ -224,7 +268,8 @@ curl -X POST http://localhost:8000/api/loan-requests \
   -d '{"book_id":1,"branch_id":1,"request_type":"return"}'
 ```
 
-### Одобрить заявку библиотекарем
+Одобрить заявку администратором:
+
 ```bash
 curl -X POST http://localhost:8000/api/loan-requests/1/approve \
   -H "Content-Type: application/json" \
@@ -232,14 +277,16 @@ curl -X POST http://localhost:8000/api/loan-requests/1/approve \
   -d '{"status":"approved"}'
 ```
 
-### Количество студентов, которым выдавалась конкретная книга
+Отчет по студентам, которым выдавалась книга:
+
 ```bash
 curl "http://localhost:8000/api/reports/book-students?book_id=1" \
   -H "X-User-Id: 1"
 ```
 
-## 7) Скриншоты для отчета
+## Диаграммы и материалы для отчета
 
-Папка для скриншотов: `docs/screenshots`.
-
-Рекомендуемые файлы перечислены в `docs/screenshots/README.md`.
+- ER-диаграмму можно построить в pgAdmin по текущей БД.
+- Диаграммы вариантов использования и карта функций находятся в `docs/project_diagrams.html`.
+- Описание диаграмм находится в `docs/project_diagrams.md`.
+- Скриншоты для отчета можно складывать в `docs/screenshots`.

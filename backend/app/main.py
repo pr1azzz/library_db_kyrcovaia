@@ -167,6 +167,17 @@ def serve_page(page_name: str) -> FileResponse:
     return FileResponse(file_path)
 
 
+def serve_frontend_file(file_name: str, media_type: str) -> FileResponse:
+    if FRONTEND_DIR is None:
+        raise HTTPException(status_code=404, detail="Frontend не найден")
+
+    file_path = FRONTEND_DIR / file_name
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Файл не найден")
+
+    return FileResponse(file_path, media_type=media_type)
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_pool()
@@ -180,6 +191,16 @@ def on_shutdown() -> None:
 @app.get("/api/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def manifest_file() -> FileResponse:
+    return serve_frontend_file("manifest.webmanifest", "application/manifest+json")
+
+
+@app.get("/sw.js", include_in_schema=False)
+def service_worker_file() -> FileResponse:
+    return serve_frontend_file("sw.js", "application/javascript")
 
 
 @app.post("/api/auth/register")

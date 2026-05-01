@@ -78,6 +78,15 @@ async function apiRequest(path, options = {}) {
     return payload;
 }
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
 function formatMoney(value) {
     if (value === null || value === undefined || value === '') {
         return '-';
@@ -642,6 +651,8 @@ async function initBooksPage() {
     const bookForm = document.getElementById('bookForm');
     const bookModalEl = document.getElementById('bookModal');
     const bookModal = bookModalEl ? new bootstrap.Modal(bookModalEl) : null;
+    const bookDetailsModalEl = document.getElementById('bookDetailsModal');
+    const bookDetailsModal = bookDetailsModalEl ? new bootstrap.Modal(bookDetailsModalEl) : null;
 
     const fields = {
         modalTitle: document.getElementById('bookModalTitle'),
@@ -653,6 +664,13 @@ async function initBooksPage() {
         illustrations: document.getElementById('bookIllustrations'),
         publisher: document.getElementById('bookPublisher'),
         authors: document.getElementById('bookAuthors'),
+        detailsTitle: document.getElementById('bookDetailsTitle'),
+        detailsAuthors: document.getElementById('bookDetailsAuthors'),
+        detailsYear: document.getElementById('bookDetailsYear'),
+        detailsPublisher: document.getElementById('bookDetailsPublisher'),
+        detailsPrice: document.getElementById('bookDetailsPrice'),
+        detailsPages: document.getElementById('bookDetailsPages'),
+        detailsIllustrations: document.getElementById('bookDetailsIllustrations'),
     };
 
     const filters = {
@@ -680,16 +698,17 @@ async function initBooksPage() {
                     `
                     : '';
                 const clientActions = isClient()
-                    ? `<button class="btn btn-sm btn-primary" data-action="borrow-book" data-id="${book.id_book}" data-title="${book.title || ''}">Взять</button>`
+                    ? `<button class="btn btn-sm btn-primary" data-action="borrow-book" data-id="${book.id_book}" data-title="${escapeHtml(book.title || '')}">Взять</button>`
                     : '';
-                const actions = `${clientActions}${adminActions}` || '<span class="text-muted">Просмотр</span>';
+                const viewAction = `<button class="btn btn-sm btn-outline-secondary me-1" data-action="view-book" data-id="${book.id_book}">Подробнее</button>`;
+                const actions = `${viewAction}${clientActions}${adminActions}`;
 
                 return `
                     <tr>
-                        <td>${book.title || '-'}</td>
-                        <td>${book.authors || '-'}</td>
+                        <td>${escapeHtml(book.title || '-')}</td>
+                        <td>${escapeHtml(book.authors || '-')}</td>
                         <td>${book.publication_year || '-'}</td>
-                        <td>${book.publisher_name || '-'}</td>
+                        <td>${escapeHtml(book.publisher_name || '-')}</td>
                         <td>${formatMoney(book.price)}</td>
                         <td class="text-end">${actions}</td>
                     </tr>
@@ -705,6 +724,26 @@ async function initBooksPage() {
             year: filters.year,
         });
         renderBooksTable();
+    }
+
+    function openBookDetailsModal(bookId) {
+        const book = state.books.find((item) => Number(item.id_book) === Number(bookId));
+        if (!book) {
+            showToast('Книга не найдена', 'danger');
+            return;
+        }
+
+        fields.detailsTitle.textContent = book.title || 'Информация о книге';
+        fields.detailsAuthors.textContent = book.authors || '-';
+        fields.detailsYear.textContent = book.publication_year || '-';
+        fields.detailsPublisher.textContent = book.publisher_name || '-';
+        fields.detailsPrice.textContent = formatMoney(book.price);
+        fields.detailsPages.textContent = book.pages_count ?? '-';
+        fields.detailsIllustrations.textContent = book.illustrations_count ?? '-';
+
+        if (bookDetailsModal) {
+            bookDetailsModal.show();
+        }
     }
 
     function openBookModalForCreate() {
@@ -826,7 +865,9 @@ async function initBooksPage() {
             const id = button.dataset.id;
 
             try {
-                if (action === 'edit-book') {
+                if (action === 'view-book') {
+                    openBookDetailsModal(id);
+                } else if (action === 'edit-book') {
                     openBookModalForEdit(id);
                 } else if (action === 'delete-book') {
                     await deleteBook(id);
@@ -1442,6 +1483,7 @@ async function bootstrapApp() {
     initTheme();
     initNav();
     initAuth();
+    registerServiceWorker();
 
     if (currentPage === 'dashboard') {
         await initDashboardPage();
@@ -1454,6 +1496,18 @@ async function bootstrapApp() {
     } else if (currentPage === 'account') {
         await initAccountPage();
     }
+}
+
+function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) {
+        return;
+    }
+
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {
+            // PWA не должна мешать основной работе приложения.
+        });
+    });
 }
 
 bootstrapApp();

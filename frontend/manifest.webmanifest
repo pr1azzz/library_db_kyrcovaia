@@ -1,0 +1,19 @@
+{
+  "name": "Library IS",
+  "short_name": "Library IS",
+  "description": "Информационная система библиотеки",
+  "lang": "ru",
+  "start_url": "/dashboard",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f8fb",
+  "theme_color": "#0f7285",
+  "icons": [
+    {
+      "src": "/static/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
