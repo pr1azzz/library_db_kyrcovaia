@@ -9,23 +9,25 @@
 </head>
 <body data-page="books">
     <header class="topbar shadow-sm">
-        <div class="container-fluid py-3 d-flex flex-column flex-lg-row align-items-lg-center gap-3">
-            <div class="d-flex align-items-center justify-content-between w-100 w-lg-auto">
+        <div class="container-fluid header-shell">
+            <div class="header-brand">
                 <h1 class="m-0 app-title">Library IS</h1>
                 <button id="themeToggleBtn" class="btn btn-sm btn-outline-light d-lg-none" type="button">Тема</button>
             </div>
 
-            <nav class="nav nav-pills nav-fill nav-compact flex-grow-1" id="mainNav">
+            <nav class="nav nav-pills nav-compact header-nav" id="mainNav">
                 <a class="nav-link" href="/dashboard" data-page="dashboard">Дашборд</a>
                 <a class="nav-link" href="/books" data-page="books">Книги</a>
                 <a class="nav-link" href="/branches" data-page="branches">Филиалы</a>
-                <a class="nav-link" href="/account" data-page="account">Кабинет</a>
                 <a class="nav-link" href="/reports" data-page="reports" data-admin-only>Отчеты</a>
             </nav>
 
-            <button id="themeToggleBtnDesktop" class="btn btn-sm btn-outline-light d-none d-lg-inline-flex" type="button">
-                Сменить тему
-            </button>
+            <div class="header-tools">
+                <button id="themeToggleBtnDesktop" class="btn btn-sm btn-outline-light d-none d-lg-inline-flex" type="button">
+                    Сменить тему
+                </button>
+                <div id="authBox" class="auth-box d-flex align-items-center gap-2 flex-wrap justify-content-end"></div>
+            </div>
         </div>
     </header>
 

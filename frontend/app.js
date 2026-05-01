@@ -138,6 +138,23 @@ function roleLabel(user = state.user) {
     return user.role === 'admin' ? 'Администратор библиотеки' : 'Студент';
 }
 
+function requestTypeLabel(requestType) {
+    return requestType === 'take' ? 'Получение' : 'Возврат';
+}
+
+function requestStatusBadge(request) {
+    if (request.status === 'pending') {
+        return '<span class="badge text-bg-warning">Подтверждение</span>';
+    }
+    if (request.status === 'rejected') {
+        return '<span class="badge text-bg-danger">Отклонено</span>';
+    }
+    if (request.request_type === 'take') {
+        return '<span class="badge text-bg-info">На руках</span>';
+    }
+    return '<span class="badge text-bg-success">Вернул</span>';
+}
+
 function setUser(user) {
     state.user = user;
     if (user) {
@@ -225,17 +242,9 @@ function renderAuthUI() {
     document.body.classList.remove('role-guest', 'role-client', 'role-admin');
     document.body.classList.add(state.user?.role === 'admin' ? 'role-admin' : state.user?.role === 'client' ? 'role-client' : 'role-guest');
 
-    const topbarInner = document.querySelector('.topbar .container-fluid');
-    if (!topbarInner) {
-        return;
-    }
-
-    let authBox = document.getElementById('authBox');
+    const authBox = document.getElementById('authBox');
     if (!authBox) {
-        authBox = document.createElement('div');
-        authBox.id = 'authBox';
-        authBox.className = 'auth-box d-flex align-items-center gap-2 flex-wrap justify-content-end';
-        topbarInner.appendChild(authBox);
+        return;
     }
 
     if (state.user) {
@@ -500,7 +509,7 @@ async function getBookBranchAnalytics(bookTitle, branchName) {
         apiRequest(`/books/faculties${buildQuery({ title: bookTitle, branch: branchName })}`),
     ]);
 
-        return {
+    return {
         copiesCount: countData.copies_count ?? 0,
         facultiesCount: facultiesData.faculties_count ?? (facultiesData.faculties || []).length,
         faculties: facultiesData.faculties || [],
@@ -1298,14 +1307,12 @@ async function initReportsPage() {
 async function initAccountPage() {
     const profileBlock = document.getElementById('accountProfile');
     const loansBody = document.querySelector('#accountLoansTable tbody');
-    const requestsBody = document.querySelector('#accountRequestsTable tbody');
     const pendingRequestsBody = document.querySelector('#pendingRequestsTable tbody');
 
     if (!state.user) {
         profileBlock.innerHTML = '<p class="mb-3">Войдите или зарегистрируйтесь, чтобы видеть личный кабинет.</p><button id="accountLoginBtn" class="btn btn-primary" type="button">Войти</button>';
         document.getElementById('accountLoginBtn')?.addEventListener('click', () => openAuthModal('login'));
         if (loansBody) loansBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Нет данных</td></tr>';
-        if (requestsBody) requestsBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Нет данных</td></tr>';
         return;
     }
 
@@ -1327,8 +1334,13 @@ async function initAccountPage() {
     `;
 
     try {
-        // Загрузить историю выдач
-        const loans = await fetchMyLoans();
+        const [loans, requests] = await Promise.all([fetchMyLoans(), fetchMyLoanRequests()]);
+        const pendingReturnKeys = new Set(
+            requests
+                .filter((request) => request.request_type === 'return' && request.status === 'pending')
+                .map((request) => `${request.id_book}:${request.id_branch}`),
+        );
+
         if (loansBody) {
             if (!loans.length) {
                 loansBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">История выдач пуста</td></tr>';
@@ -1344,8 +1356,10 @@ async function initAccountPage() {
                                 <td>
                                     ${
                                         loan.returned_at
-                                            ? new Date(loan.returned_at).toLocaleString('ru-RU')
-                                            : `<button class="btn btn-sm btn-primary" type="button" data-action="return-loan" data-id="${loan.id_loan}">Вернуть</button>`
+                                            ? '<span class="badge text-bg-success">Вернул</span>'
+                                            : pendingReturnKeys.has(`${loan.id_book}:${loan.id_branch}`)
+                                                ? '<span class="badge text-bg-warning">Подтверждение возврата</span>'
+                                                : `<div class="d-flex justify-content-end align-items-center gap-2"><span class="badge text-bg-info">На руках</span><button class="btn btn-sm btn-primary" type="button" data-action="request-return" data-book-id="${loan.id_book}" data-branch-id="${loan.id_branch}">Вернуть</button></div>`
                                     }
                                 </td>
                             </tr>
@@ -1356,50 +1370,20 @@ async function initAccountPage() {
                 if (!loansBody.dataset.returnHandlerAttached) {
                     loansBody.dataset.returnHandlerAttached = 'true';
                     loansBody.addEventListener('click', async (event) => {
-                        const button = event.target.closest('button[data-action="return-loan"]');
+                        const button = event.target.closest('button[data-action="request-return"]');
                         if (!button) {
                             return;
                         }
 
                         try {
-                            await returnLoan(button.dataset.id);
-                            showToast('Книга возвращена', 'success');
+                            await createLoanRequest(button.dataset.bookId, button.dataset.branchId, 'return');
+                            showToast('Запрос на возврат отправлен библиотекарю', 'success');
                             await initAccountPage();
                         } catch (error) {
                             showToast(error.message, 'danger');
                         }
                     });
                 }
-            }
-        }
-
-        // Загрузить запросы студента на выдачу/возврат
-        const requests = await fetchMyLoanRequests();
-        if (requestsBody) {
-            if (!requests.length) {
-                requestsBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Запросы не созданы</td></tr>';
-            } else {
-                requestsBody.innerHTML = requests
-                    .map(
-                        (req) => {
-                            const statusBadge = {
-                                pending: '<span class="badge bg-warning">Ожидает</span>',
-                                approved: '<span class="badge bg-success">Одобрено</span>',
-                                rejected: '<span class="badge bg-danger">Отклонено</span>',
-                            }[req.status] || req.status;
-
-                            return `
-                                <tr>
-                                    <td>${req.title}</td>
-                                    <td>${req.branch_name}</td>
-                                    <td>${req.request_type === 'take' ? 'Взять' : 'Вернуть'}</td>
-                                    <td>${statusBadge}</td>
-                                    <td>${new Date(req.created_at).toLocaleString('ru-RU')}</td>
-                                </tr>
-                            `;
-                        },
-                    )
-                    .join('');
             }
         }
 
@@ -1416,7 +1400,7 @@ async function initAccountPage() {
                                 <td>${req.full_name}</td>
                                 <td>${req.title}</td>
                                 <td>${req.branch_name}</td>
-                                <td>${req.request_type === 'take' ? 'Взять' : 'Вернуть'}</td>
+                                <td>${requestTypeLabel(req.request_type)}</td>
                                 <td>${new Date(req.created_at).toLocaleString('ru-RU')}</td>
                                 <td class="text-end">
                                     <button class="btn btn-sm btn-success" type="button" data-action="approve-request" data-id="${req.id_request}" data-status="approved">Одобрить</button>

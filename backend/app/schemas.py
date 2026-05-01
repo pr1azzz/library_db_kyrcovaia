@@ -1,6 +1,6 @@
 ﻿from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -79,11 +79,11 @@ class LoanCreatePayload(BaseModel):
 class LoanRequestCreatePayload(BaseModel):
     book_id: int
     branch_id: int
-    request_type: str = Field(..., regex="^(take|return)$")
+    request_type: Literal["take", "return"]
 
 
 class LoanRequestApprovalPayload(BaseModel):
-    status: str = Field(..., regex="^(approved|rejected)$")
+    status: Literal["approved", "rejected"]
 
 
 class FacultyUpsertPayload(BaseModel):

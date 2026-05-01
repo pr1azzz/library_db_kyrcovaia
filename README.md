@@ -30,6 +30,9 @@
 - `faculties`
 - `inventory`
 - `book_faculty`
+- `app_users`
+- `book_loans`
+- `loan_requests`
 
 Реализованные объекты:
 1. Функция `get_book_count_in_branch(p_branch_name, p_book_title)`.
@@ -54,10 +57,19 @@
 - `GET /api/stats`
 - `GET /api/books` (фильтры: `title`, `author`, `publisher`, `year`)
 - `GET /api/books/options`
+- `GET /api/books/{book_id}/availability`
 - `GET /api/books/top-issued?limit=10`
 - `GET /api/branches`
 - `GET /api/branches/options`
 - `GET /api/branches/{id}/inventory`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/me`
+- `GET /api/loan-requests/my`
+- `GET /api/loan-requests/pending`
+- `POST /api/loan-requests`
+- `POST /api/loan-requests/{id}/approve`
+- `GET /api/reports/book-students?book_id=...`
 
 ### Frontend (многостраничный)
 
@@ -65,7 +77,8 @@
 - `/dashboard` — статистика + быстрый поиск
 - `/books` — таблица книг, фильтры, add/edit/delete
 - `/branches` — филиалы, add/edit/delete, просмотр книг и аналитики
-- `/reports` — отчет книга+филиал + TOP 10 выдаваемых книг
+- `/reports` — отчет книга+филиал + самые выдаваемые книги
+- `/account` — кабинет студента и администратора библиотеки
 
 Дополнительно:
 - адаптивная верстка;
@@ -195,18 +208,28 @@ curl "http://localhost:8000/api/books/count?branch=Центральный%20фи
 curl -X DELETE http://localhost:8000/api/branches/1 -H "X-User-Id: 1"
 ```
 
-### Выдать книгу студенту
+### Создать заявку на выдачу книги
 ```bash
-curl -X POST http://localhost:8000/api/loans \
+curl -X POST http://localhost:8000/api/loan-requests \
   -H "Content-Type: application/json" \
   -H "X-User-Id: 2" \
-  -d '{"book_id":1,"branch_id":1}'
+  -d '{"book_id":1,"branch_id":1,"request_type":"take"}'
 ```
 
-### Вернуть книгу студентом
+### Создать заявку на возврат книги
 ```bash
-curl -X POST http://localhost:8000/api/loans/1/return \
-  -H "X-User-Id: 2"
+curl -X POST http://localhost:8000/api/loan-requests \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: 2" \
+  -d '{"book_id":1,"branch_id":1,"request_type":"return"}'
+```
+
+### Одобрить заявку библиотекарем
+```bash
+curl -X POST http://localhost:8000/api/loan-requests/1/approve \
+  -H "Content-Type: application/json" \
+  -H "X-User-Id: 1" \
+  -d '{"status":"approved"}'
 ```
 
 ### Количество студентов, которым выдавалась конкретная книга
