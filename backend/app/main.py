@@ -167,17 +167,6 @@ def serve_page(page_name: str) -> FileResponse:
     return FileResponse(file_path)
 
 
-def serve_frontend_file(file_name: str, media_type: str) -> FileResponse:
-    if FRONTEND_DIR is None:
-        raise HTTPException(status_code=404, detail="Frontend не найден")
-
-    file_path = FRONTEND_DIR / file_name
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail="Файл не найден")
-
-    return FileResponse(file_path, media_type=media_type)
-
-
 @app.on_event("startup")
 def on_startup() -> None:
     init_pool()
@@ -191,16 +180,6 @@ def on_shutdown() -> None:
 @app.get("/api/health")
 def health_check() -> dict[str, str]:
     return {"status": "ok"}
-
-
-@app.get("/manifest.webmanifest", include_in_schema=False)
-def manifest_file() -> FileResponse:
-    return serve_frontend_file("manifest.webmanifest", "application/manifest+json")
-
-
-@app.get("/sw.js", include_in_schema=False)
-def service_worker_file() -> FileResponse:
-    return serve_frontend_file("sw.js", "application/javascript")
 
 
 @app.post("/api/auth/register")
@@ -781,7 +760,7 @@ def delete_branch(
 @app.post("/api/loans")
 def create_loan(
     payload: LoanCreatePayload,
-    user: dict[str, Any] = Depends(require_admin),
+    user: dict[str, Any] = Depends(require_client_or_admin),
     connection: psycopg.Connection = Depends(get_connection),
 ) -> dict[str, Any]:
     try:
@@ -848,8 +827,6 @@ def list_my_loans(
                 """
                 SELECT
                     l.id_loan,
-                    l.id_book,
-                    l.id_branch,
                     b.title,
                     br.name AS branch_name,
                     f.name AS faculty_name,
@@ -873,7 +850,7 @@ def list_my_loans(
 @app.post("/api/loans/{loan_id}/return")
 def return_loan(
     loan_id: int,
-    user: dict[str, Any] = Depends(require_admin),
+    user: dict[str, Any] = Depends(require_user),
     connection: psycopg.Connection = Depends(get_connection),
 ) -> dict[str, Any]:
     try:
@@ -891,6 +868,9 @@ def return_loan(
 
             if loan_row is None:
                 raise HTTPException(status_code=404, detail="Запись выдачи не найдена")
+
+            if user["role"] != "admin" and int(loan_row["id_user"]) != int(user["id_user"]):
+                raise HTTPException(status_code=403, detail="Можно вернуть только свою книгу")
 
             if loan_row["returned_at"] is not None:
                 raise HTTPException(status_code=409, detail="Книга уже возвращена")
@@ -939,53 +919,6 @@ def create_loan_request(
         with connection.cursor(row_factory=dict_row) as cursor:
             cursor.execute(
                 """
-                SELECT 1
-                FROM loan_requests
-                WHERE id_user = %s
-                  AND id_book = %s
-                  AND id_branch = %s
-                  AND request_type = %s
-                  AND status = 'pending'
-                LIMIT 1
-                """,
-                (user["id_user"], payload.book_id, payload.branch_id, payload.request_type),
-            )
-            if cursor.fetchone() is not None:
-                raise HTTPException(status_code=409, detail="По этой книге уже есть необработанный запрос")
-
-            if payload.request_type == "take":
-                cursor.execute(
-                    """
-                    SELECT 1
-                    FROM book_loans
-                    WHERE id_user = %s
-                      AND id_book = %s
-                      AND id_branch = %s
-                      AND returned_at IS NULL
-                    LIMIT 1
-                    """,
-                    (user["id_user"], payload.book_id, payload.branch_id),
-                )
-                if cursor.fetchone() is not None:
-                    raise HTTPException(status_code=409, detail="Эта книга уже находится у студента")
-            else:
-                cursor.execute(
-                    """
-                    SELECT 1
-                    FROM book_loans
-                    WHERE id_user = %s
-                      AND id_book = %s
-                      AND id_branch = %s
-                      AND returned_at IS NULL
-                    LIMIT 1
-                    """,
-                    (user["id_user"], payload.book_id, payload.branch_id),
-                )
-                if cursor.fetchone() is None:
-                    raise HTTPException(status_code=409, detail="Нет активной выдачи для возврата")
-
-            cursor.execute(
-                """
                 INSERT INTO loan_requests(id_user, id_book, id_branch, id_faculty, request_type)
                 VALUES (%s, %s, %s, %s, %s)
                 RETURNING id_request, created_at
@@ -1017,8 +950,6 @@ def list_my_loan_requests(
                 """
                 SELECT
                     r.id_request,
-                    r.id_book,
-                    r.id_branch,
                     b.title,
                     br.name AS branch_name,
                     f.name AS faculty_name,

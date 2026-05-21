@@ -1,4 +1,4 @@
-# Информационная система библиотеки
+﻿# Информационная система библиотеки
 
 Курсовой проект: информационная система библиотеки на **PostgreSQL + PL/pgSQL + FastAPI + HTML/CSS/JavaScript**.
 
@@ -282,11 +282,3 @@ curl -X POST http://localhost:8000/api/loan-requests/1/approve \
 ```bash
 curl "http://localhost:8000/api/reports/book-students?book_id=1" \
   -H "X-User-Id: 1"
-```
-
-## Диаграммы и материалы для отчета
-
-- ER-диаграмму можно построить в pgAdmin по текущей БД.
-- Диаграммы вариантов использования и карта функций находятся в `docs/project_diagrams.html`.
-- Описание диаграмм находится в `docs/project_diagrams.md`.
-- Скриншоты для отчета можно складывать в `docs/screenshots`.

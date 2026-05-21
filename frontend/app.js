@@ -78,15 +78,6 @@ async function apiRequest(path, options = {}) {
     return payload;
 }
 
-function escapeHtml(value) {
-    return String(value ?? '')
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;')
-        .replaceAll("'", '&#39;');
-}
-
 function formatMoney(value) {
     if (value === null || value === undefined || value === '') {
         return '-';
@@ -145,23 +136,6 @@ function roleLabel(user = state.user) {
         return '';
     }
     return user.role === 'admin' ? 'Администратор библиотеки' : 'Студент';
-}
-
-function requestTypeLabel(requestType) {
-    return requestType === 'take' ? 'Получение' : 'Возврат';
-}
-
-function requestStatusBadge(request) {
-    if (request.status === 'pending') {
-        return '<span class="badge text-bg-warning">Подтверждение</span>';
-    }
-    if (request.status === 'rejected') {
-        return '<span class="badge text-bg-danger">Отклонено</span>';
-    }
-    if (request.request_type === 'take') {
-        return '<span class="badge text-bg-info">На руках</span>';
-    }
-    return '<span class="badge text-bg-success">Вернул</span>';
 }
 
 function setUser(user) {
@@ -251,9 +225,17 @@ function renderAuthUI() {
     document.body.classList.remove('role-guest', 'role-client', 'role-admin');
     document.body.classList.add(state.user?.role === 'admin' ? 'role-admin' : state.user?.role === 'client' ? 'role-client' : 'role-guest');
 
-    const authBox = document.getElementById('authBox');
-    if (!authBox) {
+    const topbarInner = document.querySelector('.topbar .container-fluid');
+    if (!topbarInner) {
         return;
+    }
+
+    let authBox = document.getElementById('authBox');
+    if (!authBox) {
+        authBox = document.createElement('div');
+        authBox.id = 'authBox';
+        authBox.className = 'auth-box d-flex align-items-center gap-2 flex-wrap justify-content-end';
+        topbarInner.appendChild(authBox);
     }
 
     if (state.user) {
@@ -518,7 +500,7 @@ async function getBookBranchAnalytics(bookTitle, branchName) {
         apiRequest(`/books/faculties${buildQuery({ title: bookTitle, branch: branchName })}`),
     ]);
 
-    return {
+        return {
         copiesCount: countData.copies_count ?? 0,
         facultiesCount: facultiesData.faculties_count ?? (facultiesData.faculties || []).length,
         faculties: facultiesData.faculties || [],
@@ -651,8 +633,6 @@ async function initBooksPage() {
     const bookForm = document.getElementById('bookForm');
     const bookModalEl = document.getElementById('bookModal');
     const bookModal = bookModalEl ? new bootstrap.Modal(bookModalEl) : null;
-    const bookDetailsModalEl = document.getElementById('bookDetailsModal');
-    const bookDetailsModal = bookDetailsModalEl ? new bootstrap.Modal(bookDetailsModalEl) : null;
 
     const fields = {
         modalTitle: document.getElementById('bookModalTitle'),
@@ -664,13 +644,6 @@ async function initBooksPage() {
         illustrations: document.getElementById('bookIllustrations'),
         publisher: document.getElementById('bookPublisher'),
         authors: document.getElementById('bookAuthors'),
-        detailsTitle: document.getElementById('bookDetailsTitle'),
-        detailsAuthors: document.getElementById('bookDetailsAuthors'),
-        detailsYear: document.getElementById('bookDetailsYear'),
-        detailsPublisher: document.getElementById('bookDetailsPublisher'),
-        detailsPrice: document.getElementById('bookDetailsPrice'),
-        detailsPages: document.getElementById('bookDetailsPages'),
-        detailsIllustrations: document.getElementById('bookDetailsIllustrations'),
     };
 
     const filters = {
@@ -698,17 +671,16 @@ async function initBooksPage() {
                     `
                     : '';
                 const clientActions = isClient()
-                    ? `<button class="btn btn-sm btn-primary" data-action="borrow-book" data-id="${book.id_book}" data-title="${escapeHtml(book.title || '')}">Взять</button>`
+                    ? `<button class="btn btn-sm btn-primary" data-action="borrow-book" data-id="${book.id_book}" data-title="${book.title || ''}">Взять</button>`
                     : '';
-                const viewAction = `<button class="btn btn-sm btn-outline-secondary me-1" data-action="view-book" data-id="${book.id_book}">Подробнее</button>`;
-                const actions = `${viewAction}${clientActions}${adminActions}`;
+                const actions = `${clientActions}${adminActions}` || '<span class="text-muted">Просмотр</span>';
 
                 return `
                     <tr>
-                        <td>${escapeHtml(book.title || '-')}</td>
-                        <td>${escapeHtml(book.authors || '-')}</td>
+                        <td>${book.title || '-'}</td>
+                        <td>${book.authors || '-'}</td>
                         <td>${book.publication_year || '-'}</td>
-                        <td>${escapeHtml(book.publisher_name || '-')}</td>
+                        <td>${book.publisher_name || '-'}</td>
                         <td>${formatMoney(book.price)}</td>
                         <td class="text-end">${actions}</td>
                     </tr>
@@ -724,26 +696,6 @@ async function initBooksPage() {
             year: filters.year,
         });
         renderBooksTable();
-    }
-
-    function openBookDetailsModal(bookId) {
-        const book = state.books.find((item) => Number(item.id_book) === Number(bookId));
-        if (!book) {
-            showToast('Книга не найдена', 'danger');
-            return;
-        }
-
-        fields.detailsTitle.textContent = book.title || 'Информация о книге';
-        fields.detailsAuthors.textContent = book.authors || '-';
-        fields.detailsYear.textContent = book.publication_year || '-';
-        fields.detailsPublisher.textContent = book.publisher_name || '-';
-        fields.detailsPrice.textContent = formatMoney(book.price);
-        fields.detailsPages.textContent = book.pages_count ?? '-';
-        fields.detailsIllustrations.textContent = book.illustrations_count ?? '-';
-
-        if (bookDetailsModal) {
-            bookDetailsModal.show();
-        }
     }
 
     function openBookModalForCreate() {
@@ -865,9 +817,7 @@ async function initBooksPage() {
             const id = button.dataset.id;
 
             try {
-                if (action === 'view-book') {
-                    openBookDetailsModal(id);
-                } else if (action === 'edit-book') {
+                if (action === 'edit-book') {
                     openBookModalForEdit(id);
                 } else if (action === 'delete-book') {
                     await deleteBook(id);
@@ -1348,12 +1298,14 @@ async function initReportsPage() {
 async function initAccountPage() {
     const profileBlock = document.getElementById('accountProfile');
     const loansBody = document.querySelector('#accountLoansTable tbody');
+    const requestsBody = document.querySelector('#accountRequestsTable tbody');
     const pendingRequestsBody = document.querySelector('#pendingRequestsTable tbody');
 
     if (!state.user) {
         profileBlock.innerHTML = '<p class="mb-3">Войдите или зарегистрируйтесь, чтобы видеть личный кабинет.</p><button id="accountLoginBtn" class="btn btn-primary" type="button">Войти</button>';
         document.getElementById('accountLoginBtn')?.addEventListener('click', () => openAuthModal('login'));
         if (loansBody) loansBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Нет данных</td></tr>';
+        if (requestsBody) requestsBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Нет данных</td></tr>';
         return;
     }
 
@@ -1375,13 +1327,8 @@ async function initAccountPage() {
     `;
 
     try {
-        const [loans, requests] = await Promise.all([fetchMyLoans(), fetchMyLoanRequests()]);
-        const pendingReturnKeys = new Set(
-            requests
-                .filter((request) => request.request_type === 'return' && request.status === 'pending')
-                .map((request) => `${request.id_book}:${request.id_branch}`),
-        );
-
+        // Загрузить историю выдач
+        const loans = await fetchMyLoans();
         if (loansBody) {
             if (!loans.length) {
                 loansBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">История выдач пуста</td></tr>';
@@ -1397,10 +1344,8 @@ async function initAccountPage() {
                                 <td>
                                     ${
                                         loan.returned_at
-                                            ? '<span class="badge text-bg-success">Вернул</span>'
-                                            : pendingReturnKeys.has(`${loan.id_book}:${loan.id_branch}`)
-                                                ? '<span class="badge text-bg-warning">Подтверждение возврата</span>'
-                                                : `<div class="d-flex justify-content-end align-items-center gap-2"><span class="badge text-bg-info">На руках</span><button class="btn btn-sm btn-primary" type="button" data-action="request-return" data-book-id="${loan.id_book}" data-branch-id="${loan.id_branch}">Вернуть</button></div>`
+                                            ? new Date(loan.returned_at).toLocaleString('ru-RU')
+                                            : `<button class="btn btn-sm btn-primary" type="button" data-action="return-loan" data-id="${loan.id_loan}">Вернуть</button>`
                                     }
                                 </td>
                             </tr>
@@ -1411,20 +1356,50 @@ async function initAccountPage() {
                 if (!loansBody.dataset.returnHandlerAttached) {
                     loansBody.dataset.returnHandlerAttached = 'true';
                     loansBody.addEventListener('click', async (event) => {
-                        const button = event.target.closest('button[data-action="request-return"]');
+                        const button = event.target.closest('button[data-action="return-loan"]');
                         if (!button) {
                             return;
                         }
 
                         try {
-                            await createLoanRequest(button.dataset.bookId, button.dataset.branchId, 'return');
-                            showToast('Запрос на возврат отправлен библиотекарю', 'success');
+                            await returnLoan(button.dataset.id);
+                            showToast('Книга возвращена', 'success');
                             await initAccountPage();
                         } catch (error) {
                             showToast(error.message, 'danger');
                         }
                     });
                 }
+            }
+        }
+
+        // Загрузить запросы студента на выдачу/возврат
+        const requests = await fetchMyLoanRequests();
+        if (requestsBody) {
+            if (!requests.length) {
+                requestsBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Запросы не созданы</td></tr>';
+            } else {
+                requestsBody.innerHTML = requests
+                    .map(
+                        (req) => {
+                            const statusBadge = {
+                                pending: '<span class="badge bg-warning">Ожидает</span>',
+                                approved: '<span class="badge bg-success">Одобрено</span>',
+                                rejected: '<span class="badge bg-danger">Отклонено</span>',
+                            }[req.status] || req.status;
+
+                            return `
+                                <tr>
+                                    <td>${req.title}</td>
+                                    <td>${req.branch_name}</td>
+                                    <td>${req.request_type === 'take' ? 'Взять' : 'Вернуть'}</td>
+                                    <td>${statusBadge}</td>
+                                    <td>${new Date(req.created_at).toLocaleString('ru-RU')}</td>
+                                </tr>
+                            `;
+                        },
+                    )
+                    .join('');
             }
         }
 
@@ -1441,7 +1416,7 @@ async function initAccountPage() {
                                 <td>${req.full_name}</td>
                                 <td>${req.title}</td>
                                 <td>${req.branch_name}</td>
-                                <td>${requestTypeLabel(req.request_type)}</td>
+                                <td>${req.request_type === 'take' ? 'Взять' : 'Вернуть'}</td>
                                 <td>${new Date(req.created_at).toLocaleString('ru-RU')}</td>
                                 <td class="text-end">
                                     <button class="btn btn-sm btn-success" type="button" data-action="approve-request" data-id="${req.id_request}" data-status="approved">Одобрить</button>
@@ -1483,7 +1458,6 @@ async function bootstrapApp() {
     initTheme();
     initNav();
     initAuth();
-    registerServiceWorker();
 
     if (currentPage === 'dashboard') {
         await initDashboardPage();
@@ -1496,18 +1470,6 @@ async function bootstrapApp() {
     } else if (currentPage === 'account') {
         await initAccountPage();
     }
-}
-
-function registerServiceWorker() {
-    if (!('serviceWorker' in navigator)) {
-        return;
-    }
-
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/sw.js').catch(() => {
-            // PWA не должна мешать основной работе приложения.
-        });
-    });
 }
 
 bootstrapApp();
