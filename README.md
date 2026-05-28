@@ -220,7 +220,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
 - manifest: `/manifest.webmanifest`;
 - service worker: `/sw.js`;
-- иконка: `/static/icons/icon.svg`;
+- иконка: `/frontend/icons/icon.svg`;
 - стартовая страница: `/dashboard`.
 
 После открытия `http://localhost:8000` браузер может предложить установить приложение. В Chrome установка обычно доступна через кнопку в адресной строке или меню `Установить приложение`.
