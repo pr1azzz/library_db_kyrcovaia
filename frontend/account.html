@@ -8,7 +8,7 @@
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/styles.css?v=20260528-3">
 </head>
 <body data-page="account">
     <header class="topbar shadow-sm">
@@ -92,18 +92,10 @@
 
         <div class="card section-card">
             <div class="card-body">
-                <h3 class="h5 mb-3">История выдач</h3>
+                <h3 class="h5 mb-3" id="accountHistoryTitle">История выдач</h3>
                 <div class="table-responsive">
                     <table class="table table-striped align-middle" id="accountLoansTable">
-                        <thead>
-                            <tr>
-                                <th>Книга</th>
-                                <th>Филиал</th>
-                                <th>Факультет</th>
-                                <th>Дата выдачи</th>
-                                <th>Статус</th>
-                            </tr>
-                        </thead>
+                        <thead></thead>
                         <tbody></tbody>
                     </table>
                 </div>
@@ -121,6 +113,6 @@
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=20260528-3"></script>
 </body>
 </html>

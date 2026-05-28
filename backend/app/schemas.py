@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class BookBranchFacultyPayload(BaseModel):
+    # Один блок формы книги описывает конкретный филиал: экземпляры и список факультетов.
     branch_id: int
     copies_count: int = Field(default=0, ge=0)
     faculty_ids: list[int] = Field(default_factory=list)

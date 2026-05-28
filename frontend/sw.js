@@ -1,4 +1,4 @@
-const CACHE_NAME = 'library-is-v1';
+const CACHE_NAME = 'library-is-v4';
 
 const APP_SHELL = [
     '/',

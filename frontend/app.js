@@ -99,6 +99,37 @@ function formatMoney(value) {
     }).format(Number(value));
 }
 
+function parseDbDate(value) {
+    if (!value) {
+        return null;
+    }
+
+    if (value instanceof Date) {
+        return value;
+    }
+
+    const rawValue = String(value);
+    const hasTimeZone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(rawValue);
+    return new Date(hasTimeZone ? rawValue : `${rawValue}Z`);
+}
+
+function formatMoscowDate(value) {
+    const date = parseDbDate(value);
+    if (!date || Number.isNaN(date.getTime())) {
+        return '-';
+    }
+
+    return new Intl.DateTimeFormat('ru-RU', {
+        timeZone: 'Europe/Moscow',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+    }).format(date);
+}
+
 function applyTheme(theme) {
     document.documentElement.setAttribute('data-theme', theme);
     localStorage.setItem('library-theme', theme);
@@ -249,7 +280,7 @@ function renderAuthUI() {
 
     if (state.user) {
         authBox.innerHTML = `
-            <span class="auth-user">${state.user.role === 'admin' ? roleLabel() : `${state.user.full_name} · ${roleLabel()}`}</span>
+            <span class="auth-user">${escapeHtml(state.user.full_name)}</span>
             <a class="btn btn-sm btn-outline-light" href="/account">Кабинет</a>
             <button id="logoutBtn" class="btn btn-sm btn-outline-light" type="button">Выйти</button>
         `;
@@ -515,6 +546,10 @@ async function fetchPendingLoanRequests(branchId = null) {
     return apiRequest(`/loan-requests/pending${branchId ? buildQuery({ branch_id: branchId }) : ''}`);
 }
 
+async function fetchAllLoanRequests() {
+    return apiRequest('/loan-requests');
+}
+
 async function approveLoanRequest(requestId, status) {
     return apiRequest(`/loan-requests/${requestId}/approve`, {
         method: 'POST',
@@ -673,6 +708,13 @@ async function initBooksPage() {
         publisher: document.getElementById('bookPublisher'),
         authors: document.getElementById('bookAuthors'),
         branchFacultyEditor: document.getElementById('bookBranchFacultyEditor'),
+        detailsTitle: document.getElementById('bookDetailsTitle'),
+        detailsAuthors: document.getElementById('bookDetailsAuthors'),
+        detailsYear: document.getElementById('bookDetailsYear'),
+        detailsPublisher: document.getElementById('bookDetailsPublisher'),
+        detailsPrice: document.getElementById('bookDetailsPrice'),
+        detailsPages: document.getElementById('bookDetailsPages'),
+        detailsIllustrations: document.getElementById('bookDetailsIllustrations'),
     };
 
     const filters = {
@@ -693,6 +735,7 @@ async function initBooksPage() {
 
         booksTableBody.innerHTML = state.books
             .map((book) => {
+                const detailAction = `<button class="btn btn-sm btn-outline-secondary me-1" data-action="view-book" data-id="${book.id_book}">Подробнее</button>`;
                 const adminActions = isAdmin()
                     ? `
                         <button class="btn btn-sm btn-outline-primary me-1" data-action="edit-book" data-id="${book.id_book}">Редактировать</button>
@@ -700,9 +743,9 @@ async function initBooksPage() {
                     `
                     : '';
                 const clientActions = isClient()
-                    ? `<button class="btn btn-sm btn-primary" data-action="borrow-book" data-id="${book.id_book}" data-title="${book.title || ''}">Взять</button>`
+                    ? `<button class="btn btn-sm btn-primary" data-action="borrow-book" data-id="${book.id_book}">Взять</button>`
                     : '';
-                const actions = `${clientActions}${adminActions}` || '<span class="text-muted">Просмотр</span>';
+                const actions = `${detailAction}${clientActions}${adminActions}`;
 
                 return `
                     <tr>
@@ -737,17 +780,24 @@ async function initBooksPage() {
             return;
         }
 
+        // Админ редактирует связи книги сразу в двух существующих таблицах: inventory и book_faculty.
         const byBranch = new Map(rows.map((row) => [Number(row.id_branch), row]));
         fields.branchFacultyEditor.innerHTML = state.branches
             .map((branch) => {
                 const row = byBranch.get(Number(branch.id_branch)) || {};
                 const selected = new Set((row.faculty_ids || []).map(Number));
-                const facultyOptions = state.faculties
-                    .map(
-                        (faculty) =>
-                            `<option value="${faculty.id_faculty}" ${selected.has(Number(faculty.id_faculty)) ? 'selected' : ''}>${escapeHtml(faculty.name)}</option>`,
-                    )
-                    .join('');
+                const facultyOptions = state.faculties.length
+                    ? state.faculties
+                          .map(
+                              (faculty) => `
+                                <label class="faculty-check">
+                                    <input class="form-check-input" type="checkbox" value="${faculty.id_faculty}" data-role="faculty" ${selected.has(Number(faculty.id_faculty)) ? 'checked' : ''}>
+                                    <span>${escapeHtml(faculty.name)}</span>
+                                </label>
+                            `,
+                          )
+                          .join('')
+                    : '<div class="text-muted small">Факультеты пока не добавлены.</div>';
 
                 return `
                     <div class="inventory-row" data-branch-id="${branch.id_branch}">
@@ -761,7 +811,7 @@ async function initBooksPage() {
                         </div>
                         <div>
                             <label class="form-label small">Факультеты</label>
-                            <select class="form-select" multiple size="3" data-role="faculties">${facultyOptions}</select>
+                            <div class="faculty-check-list">${facultyOptions}</div>
                         </div>
                     </div>
                 `;
@@ -777,9 +827,7 @@ async function initBooksPage() {
         return [...fields.branchFacultyEditor.querySelectorAll('.inventory-row')].map((row) => ({
             branch_id: Number(row.dataset.branchId),
             copies_count: Number(row.querySelector('[data-role="copies"]')?.value || 0),
-            faculty_ids: [...row.querySelectorAll('[data-role="faculties"] option:checked')].map((option) =>
-                Number(option.value),
-            ),
+            faculty_ids: [...row.querySelectorAll('[data-role="faculty"]:checked')].map((input) => Number(input.value)),
         }));
     }
 
@@ -831,6 +879,23 @@ async function initBooksPage() {
         if (bookModal) {
             bookModal.show();
         }
+    }
+
+    function openBookDetailsModal(bookId) {
+        const book = state.books.find((item) => Number(item.id_book) === Number(bookId));
+        if (!book) {
+            showToast('Книга не найдена', 'danger');
+            return;
+        }
+
+        fields.detailsTitle.textContent = book.title || 'Информация о книге';
+        fields.detailsAuthors.textContent = book.authors || '-';
+        fields.detailsYear.textContent = book.publication_year || '-';
+        fields.detailsPublisher.textContent = book.publisher_name || '-';
+        fields.detailsPrice.textContent = formatMoney(book.price);
+        fields.detailsPages.textContent = book.pages_count ?? '-';
+        fields.detailsIllustrations.textContent = book.illustrations_count ?? '-';
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('bookDetailsModal')).show();
     }
 
     async function submitBookForm(event) {
@@ -931,7 +996,10 @@ async function initBooksPage() {
                 } else if (action === 'delete-book') {
                     await deleteBook(id);
                 } else if (action === 'borrow-book') {
-                    await openBorrowModal(id, button.dataset.title || '');
+                    const book = state.books.find((item) => Number(item.id_book) === Number(id));
+                    await openBorrowModal(id, book?.title || '');
+                } else if (action === 'view-book') {
+                    openBookDetailsModal(id);
                 }
             } catch (error) {
                 showToast(error.message, 'danger');
@@ -1048,7 +1116,7 @@ async function initBranchesPage() {
                     <tr>
                         <td>${faculty.name}</td>
                         <td class="text-end">
-                            <button class="btn btn-sm btn-outline-secondary me-1" data-action="view-faculty-books" data-id="${faculty.id_faculty}" data-name="${escapeHtml(faculty.name)}">Книги</button>
+                            <button class="btn btn-sm btn-outline-secondary me-1" data-action="view-faculty-books" data-id="${faculty.id_faculty}" data-name="${escapeHtml(faculty.name)}">Подробнее</button>
                             <button class="btn btn-sm btn-outline-primary me-1" data-action="edit-faculty" data-id="${faculty.id_faculty}" data-name="${escapeHtml(faculty.name)}">Редактировать</button>
                             <button class="btn btn-sm btn-outline-danger" data-action="delete-faculty" data-id="${faculty.id_faculty}">Удалить</button>
                         </td>
@@ -1518,19 +1586,45 @@ async function initReportsPage() {
 
 async function initAccountPage() {
     const profileBlock = document.getElementById('accountProfile');
+    const historyTitle = document.getElementById('accountHistoryTitle');
+    const loansTable = document.getElementById('accountLoansTable');
+    const loansHead = loansTable?.querySelector('thead');
     const loansBody = document.querySelector('#accountLoansTable tbody');
-    const requestsBody = document.querySelector('#accountRequestsTable tbody');
     const pendingRequestsBody = document.querySelector('#pendingRequestsTable tbody');
     const profileForm = document.getElementById('profileForm');
     const profileFullName = document.getElementById('profileFullName');
     const profilePassword = document.getElementById('profilePassword');
     const profilePasswordConfirm = document.getElementById('profilePasswordConfirm');
 
+    function requestTypeLabel(type) {
+        return type === 'return' ? 'Возврат' : 'Получение';
+    }
+
+    function statusBadge(status, context = '') {
+        const labels = {
+            pending: context === 'return' ? 'Ожидает подтверждения возврата' : 'Ожидание',
+            approved: 'Одобрено',
+            rejected: 'Отклонено',
+            on_hand: 'На руках',
+            returned: 'Вернул',
+        };
+        const classes = {
+            pending: 'bg-warning text-dark',
+            approved: 'bg-success',
+            rejected: 'bg-danger',
+            on_hand: 'bg-info text-dark',
+            returned: 'bg-success',
+        };
+        return `<span class="badge ${classes[status] || 'bg-secondary'}">${labels[status] || status}</span>`;
+    }
+
     if (!state.user) {
         profileBlock.innerHTML = '<p class="mb-3">Войдите или зарегистрируйтесь, чтобы видеть личный кабинет.</p><button id="accountLoginBtn" class="btn btn-primary" type="button">Войти</button>';
         document.getElementById('accountLoginBtn')?.addEventListener('click', () => openAuthModal('login'));
+        if (loansHead) {
+            loansHead.innerHTML = '<tr><th>Книга</th><th>Филиал</th><th>Факультет</th><th>Дата</th><th>Статус</th></tr>';
+        }
         if (loansBody) loansBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Нет данных</td></tr>';
-        if (requestsBody) requestsBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Нет данных</td></tr>';
         return;
     }
 
@@ -1538,7 +1632,7 @@ async function initAccountPage() {
         <div class="row g-3">
             <div class="col-12 col-md-4">
                 <div class="stat-label">Пользователь</div>
-                <div class="fw-semibold">${state.user.full_name}</div>
+                <div class="fw-semibold">${escapeHtml(state.user.full_name)}</div>
             </div>
             <div class="col-12 col-md-4">
                 <div class="stat-label">Роль</div>
@@ -1546,7 +1640,7 @@ async function initAccountPage() {
             </div>
             <div class="col-12 col-md-4">
                 <div class="stat-label">Факультет</div>
-                <div class="fw-semibold">${state.user.faculty_name || '-'}</div>
+                <div class="fw-semibold">${escapeHtml(state.user.faculty_name || '-')}</div>
             </div>
         </div>
     `;
@@ -1586,83 +1680,132 @@ async function initAccountPage() {
     }
 
     try {
-        // Загрузить историю выдач
-        const loans = await fetchMyLoans();
-        if (loansBody) {
-            if (!loans.length) {
-                loansBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">История выдач пуста</td></tr>';
+        if (isAdmin()) {
+            if (historyTitle) {
+                historyTitle.textContent = 'История запросов';
+            }
+            if (loansHead) {
+                loansHead.innerHTML = `
+                    <tr>
+                        <th>Студент</th>
+                        <th>Книга</th>
+                        <th>Филиал</th>
+                        <th>Факультет</th>
+                        <th>Тип</th>
+                        <th>Статус</th>
+                        <th>Создано</th>
+                        <th>Обработал</th>
+                    </tr>
+                `;
+            }
+
+            // У администратора история строится по всем заявкам, чтобы видеть ожидание, одобрение и отказ.
+            const allRequests = await fetchAllLoanRequests();
+            if (!allRequests.length) {
+                loansBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">История запросов пуста</td></tr>';
             } else {
-                loansBody.innerHTML = loans
+                loansBody.innerHTML = allRequests
                     .map(
-                        (loan) => `
+                        (req) => `
                             <tr>
-                                <td>${loan.title}</td>
-                                <td>${loan.branch_name}</td>
-                                <td>${loan.faculty_name || '-'}</td>
-                                <td>${new Date(loan.issued_at).toLocaleString('ru-RU')}</td>
-                                <td>
-                                    ${
-                                        loan.returned_at
-                                            ? new Date(loan.returned_at).toLocaleString('ru-RU')
-                                            : `<button class="btn btn-sm btn-primary" type="button" data-action="return-loan" data-id="${loan.id_loan}">Вернуть</button>`
-                                    }
-                                </td>
+                                <td>${escapeHtml(req.full_name)}</td>
+                                <td>${escapeHtml(req.title)}</td>
+                                <td>${escapeHtml(req.branch_name)}</td>
+                                <td>${escapeHtml(req.faculty_name || '-')}</td>
+                                <td>${requestTypeLabel(req.request_type)}</td>
+                                <td>${statusBadge(req.status, req.request_type)}</td>
+                                <td>${formatMoscowDate(req.created_at)}</td>
+                                <td>${req.approved_by_name ? `${escapeHtml(req.approved_by_name)}<br><span class="text-muted small">${formatMoscowDate(req.approved_at)}</span>` : '-'}</td>
                             </tr>
                         `,
                     )
                     .join('');
+            }
+        } else {
+            if (historyTitle) {
+                historyTitle.textContent = 'История выдач и заявок';
+            }
+            if (loansHead) {
+                loansHead.innerHTML = '<tr><th>Книга</th><th>Филиал</th><th>Факультет</th><th>Дата</th><th>Статус</th></tr>';
+            }
 
-                if (!loansBody.dataset.returnHandlerAttached) {
-                    loansBody.dataset.returnHandlerAttached = 'true';
-                    loansBody.addEventListener('click', async (event) => {
-                        const button = event.target.closest('button[data-action="return-loan"]');
-                        if (!button) {
-                            return;
-                        }
+            // Для студента объединяем реальные выдачи и заявки, потому что статус возврата живет в loan_requests.
+            const [loans, requests] = await Promise.all([fetchMyLoans(), fetchMyLoanRequests()]);
+            const pendingReturnKeys = new Set(
+                requests
+                    .filter((request) => request.request_type === 'return' && request.status === 'pending')
+                    .map((request) => `${request.id_book}|${request.id_branch}`),
+            );
+            const rows = [];
 
-                        try {
-                            await returnLoan(button.dataset.id);
-                            showToast('Книга возвращена', 'success');
-                            await initAccountPage();
-                        } catch (error) {
-                            showToast(error.message, 'danger');
-                        }
-                    });
+            loans.forEach((loan) => {
+                const key = `${loan.id_book}|${loan.id_branch}`;
+                const waitingReturn = pendingReturnKeys.has(key);
+                let statusCell = statusBadge('on_hand');
+
+                if (loan.returned_at) {
+                    statusCell = `${statusBadge('returned')}<br><span class="text-muted small">${formatMoscowDate(loan.returned_at)}</span>`;
+                } else if (waitingReturn) {
+                    statusCell = statusBadge('pending', 'return');
+                } else {
+                    statusCell = `${statusBadge('on_hand')} <button class="btn btn-sm btn-outline-primary ms-2" type="button" data-action="request-return" data-book-id="${loan.id_book}" data-branch-id="${loan.id_branch}">Вернуть</button>`;
                 }
+
+                rows.push({
+                    date: loan.issued_at,
+                    html: `
+                        <tr>
+                            <td>${escapeHtml(loan.title)}</td>
+                            <td>${escapeHtml(loan.branch_name)}</td>
+                            <td>${escapeHtml(loan.faculty_name || '-')}</td>
+                            <td>${formatMoscowDate(loan.issued_at)}</td>
+                            <td>${statusCell}</td>
+                        </tr>
+                    `,
+                });
+            });
+
+            requests
+                .filter((request) => request.status !== 'approved')
+                .forEach((request) => {
+                    rows.push({
+                        date: request.created_at,
+                        html: `
+                            <tr>
+                                <td>${escapeHtml(request.title)}</td>
+                                <td>${escapeHtml(request.branch_name)}</td>
+                                <td>${escapeHtml(request.faculty_name || state.user.faculty_name || '-')}</td>
+                                <td>${formatMoscowDate(request.created_at)}</td>
+                                <td>${statusBadge(request.status, request.request_type)} <span class="text-muted small">${requestTypeLabel(request.request_type)}</span></td>
+                            </tr>
+                        `,
+                    });
+                });
+
+            rows.sort((a, b) => parseDbDate(b.date) - parseDbDate(a.date));
+            loansBody.innerHTML = rows.length
+                ? rows.map((row) => row.html).join('')
+                : '<tr><td colspan="5" class="text-center text-muted py-3">История выдач пуста</td></tr>';
+
+            if (!loansBody.dataset.returnHandlerAttached) {
+                loansBody.dataset.returnHandlerAttached = 'true';
+                loansBody.addEventListener('click', async (event) => {
+                    const button = event.target.closest('button[data-action="request-return"]');
+                    if (!button) {
+                        return;
+                    }
+
+                    try {
+                        await createLoanRequest(button.dataset.bookId, button.dataset.branchId, 'return');
+                        showToast('Запрос на возврат отправлен библиотекарю', 'success');
+                        await initAccountPage();
+                    } catch (error) {
+                        showToast(error.message, 'danger');
+                    }
+                });
             }
         }
 
-        // Загрузить запросы студента на выдачу/возврат
-        const requests = await fetchMyLoanRequests();
-        if (requestsBody) {
-            if (!requests.length) {
-                requestsBody.innerHTML = '<tr><td colspan="5" class="text-center text-muted py-3">Запросы не созданы</td></tr>';
-            } else {
-                requestsBody.innerHTML = requests
-                    .map(
-                        (req) => {
-                            const statusBadge = {
-                                pending: '<span class="badge bg-warning">Ожидает</span>',
-                                approved: '<span class="badge bg-success">Одобрено</span>',
-                                rejected: '<span class="badge bg-danger">Отклонено</span>',
-                            }[req.status] || req.status;
-
-                            return `
-                                <tr>
-                                    <td>${req.title}</td>
-                                    <td>${req.branch_name}</td>
-                                    <td>${req.request_type === 'take' ? 'Взять' : 'Вернуть'}</td>
-                                    <td>${statusBadge}</td>
-                                    <td>${new Date(req.created_at).toLocaleString('ru-RU')}</td>
-                                </tr>
-                            `;
-                        },
-                    )
-                    .join('');
-            }
-        }
-
-        // Для администратора: загрузить ожидающие запросы
         if (isAdmin() && pendingRequestsBody) {
             const pendingRequests = await fetchPendingLoanRequests();
             if (!pendingRequests.length) {
@@ -1676,7 +1819,7 @@ async function initAccountPage() {
                                 <td>${req.title}</td>
                                 <td>${req.branch_name}</td>
                                 <td>${req.request_type === 'take' ? 'Взять' : 'Вернуть'}</td>
-                                <td>${new Date(req.created_at).toLocaleString('ru-RU')}</td>
+                                <td>${formatMoscowDate(req.created_at)}</td>
                                 <td class="text-end">
                                     <button class="btn btn-sm btn-success" type="button" data-action="approve-request" data-id="${req.id_request}" data-status="approved">Одобрить</button>
                                     <button class="btn btn-sm btn-danger" type="button" data-action="approve-request" data-id="${req.id_request}" data-status="rejected">Отклонить</button>

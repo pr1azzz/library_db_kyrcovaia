@@ -9,7 +9,7 @@ from typing import Any
 import psycopg
 from psycopg import sql
 from psycopg.rows import dict_row
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -59,6 +59,26 @@ app.add_middleware(
 
 if FRONTEND_DIR is not None:
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+
+
+@app.middleware("http")
+async def add_development_cache_headers(request: Request, call_next):
+    # Во время разработки браузер и PWA не должны держать старые HTML/JS/CSS.
+    response = await call_next(request)
+    if request.url.path.startswith("/static") or request.url.path in {
+        "/",
+        "/dashboard",
+        "/books",
+        "/branches",
+        "/reports",
+        "/account",
+        "/manifest.webmanifest",
+        "/sw.js",
+    }:
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
 
 
 def normalize_value(value: Any) -> Any:
@@ -113,6 +133,7 @@ def get_optional_user(
     x_user_id: str | None = Header(default=None, alias="X-User-Id"),
     connection: psycopg.Connection = Depends(get_connection),
 ) -> dict[str, Any] | None:
+    # Простая учебная авторизация: frontend хранит id пользователя и передает его в заголовке.
     if not x_user_id:
         return None
 
@@ -213,6 +234,9 @@ def register_user(
 
         connection.commit()
         return {"message": "Регистрация выполнена", "user": public_user(row)}
+    except HTTPException:
+        connection.rollback()
+        raise
     except psycopg.Error as exc:
         connection.rollback()
         raise_http_from_db_error(exc)
@@ -742,6 +766,8 @@ def add_or_update_book(
                     )
 
             if payload.branch_faculties is not None:
+                # Связь книги с филиалами и факультетами хранится без новых таблиц:
+                # количество в inventory, использование на факультетах в book_faculty.
                 for item in payload.branch_faculties:
                     if item.copies_count > 0:
                         cursor.execute(
@@ -912,6 +938,7 @@ def add_or_update_branch(
             branch_id = int(row["id_branch"])
 
             if payload.inventory is not None:
+                # Редактирование инвентаря филиала переиспользует существующую таблицу inventory.
                 for item in payload.inventory:
                     if item.copies_count > 0:
                         cursor.execute(
@@ -1033,6 +1060,8 @@ def list_my_loans(
                 """
                 SELECT
                     l.id_loan,
+                    l.id_book,
+                    l.id_branch,
                     b.title,
                     br.name AS branch_name,
                     f.name AS faculty_name,
@@ -1123,6 +1152,53 @@ def create_loan_request(
 ) -> dict[str, Any]:
     try:
         with connection.cursor(row_factory=dict_row) as cursor:
+            # Студент не меняет инвентарь напрямую: сначала создается заявка библиотекарю.
+            if payload.request_type == "take":
+                cursor.execute(
+                    """
+                    SELECT copies_count
+                    FROM inventory
+                    WHERE id_book = %s AND id_branch = %s
+                    """,
+                    (payload.book_id, payload.branch_id),
+                )
+                inventory_row = cursor.fetchone()
+                if inventory_row is None:
+                    raise HTTPException(status_code=404, detail="В выбранном филиале нет такой книги")
+                if int(inventory_row["copies_count"]) <= 0:
+                    raise HTTPException(status_code=409, detail="Свободных экземпляров книги нет")
+            else:
+                cursor.execute(
+                    """
+                    SELECT id_loan
+                    FROM book_loans
+                    WHERE id_user = %s
+                      AND id_book = %s
+                      AND id_branch = %s
+                      AND returned_at IS NULL
+                    LIMIT 1
+                    """,
+                    (user["id_user"], payload.book_id, payload.branch_id),
+                )
+                if cursor.fetchone() is None:
+                    raise HTTPException(status_code=404, detail="Активная выдача книги не найдена")
+
+            cursor.execute(
+                """
+                SELECT id_request
+                FROM loan_requests
+                WHERE id_user = %s
+                  AND id_book = %s
+                  AND id_branch = %s
+                  AND request_type = %s
+                  AND status = 'pending'
+                LIMIT 1
+                """,
+                (user["id_user"], payload.book_id, payload.branch_id, payload.request_type),
+            )
+            if cursor.fetchone() is not None:
+                raise HTTPException(status_code=409, detail="Такая заявка уже ожидает подтверждения")
+
             cursor.execute(
                 """
                 INSERT INTO loan_requests(id_user, id_book, id_branch, id_faculty, request_type)
@@ -1140,8 +1216,49 @@ def create_loan_request(
             "id_request": int(request_row["id_request"]),
             "created_at": request_row["created_at"],
         }
+    except HTTPException:
+        connection.rollback()
+        raise
     except psycopg.Error as exc:
         connection.rollback()
+        raise_http_from_db_error(exc)
+
+
+@app.get("/api/loan-requests")
+def list_all_loan_requests(
+    _admin: dict[str, Any] = Depends(require_admin),
+    connection: psycopg.Connection = Depends(get_connection),
+) -> list[dict[str, Any]]:
+    try:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    r.id_request,
+                    r.id_book,
+                    r.id_branch,
+                    u.full_name,
+                    u.email,
+                    b.title,
+                    br.name AS branch_name,
+                    f.name AS faculty_name,
+                    r.request_type,
+                    r.status,
+                    r.created_at,
+                    r.approved_at,
+                    au.full_name AS approved_by_name
+                FROM loan_requests r
+                JOIN app_users u ON u.id_user = r.id_user
+                JOIN books b ON b.id_book = r.id_book
+                JOIN branches br ON br.id_branch = r.id_branch
+                LEFT JOIN faculties f ON f.id_faculty = r.id_faculty
+                LEFT JOIN app_users au ON au.id_user = r.approved_by
+                ORDER BY r.created_at DESC
+                """
+            )
+            rows = cursor.fetchall()
+            return [normalize_record(row) for row in rows]
+    except psycopg.Error as exc:
         raise_http_from_db_error(exc)
 
 
@@ -1156,6 +1273,8 @@ def list_my_loan_requests(
                 """
                 SELECT
                     r.id_request,
+                    r.id_book,
+                    r.id_branch,
                     b.title,
                     br.name AS branch_name,
                     f.name AS faculty_name,
@@ -1193,6 +1312,8 @@ def list_pending_loan_requests(
                     """
                     SELECT
                         r.id_request,
+                        r.id_book,
+                        r.id_branch,
                         u.full_name,
                         u.email,
                         b.title,
@@ -1216,6 +1337,8 @@ def list_pending_loan_requests(
                     """
                     SELECT
                         r.id_request,
+                        r.id_book,
+                        r.id_branch,
                         u.full_name,
                         u.email,
                         b.title,
@@ -1273,6 +1396,7 @@ def approve_loan_request(
             user_id = int(request_row["id_user"])
 
             if payload.status == "approved":
+                # Только одобрение администратора реально выдает или возвращает книгу в БД.
                 if request_type == "take":
                     cursor.execute(
                         """
@@ -1465,6 +1589,16 @@ def reports_page() -> FileResponse:
 @app.get("/account", include_in_schema=False)
 def account_page() -> FileResponse:
     return serve_page("account.html")
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+def manifest_file() -> FileResponse:
+    return serve_page("manifest.webmanifest")
+
+
+@app.get("/sw.js", include_in_schema=False)
+def service_worker_file() -> FileResponse:
+    return serve_page("sw.js")
 
 
 if __name__ == "__main__":
