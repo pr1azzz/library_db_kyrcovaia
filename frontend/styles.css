@@ -219,6 +219,12 @@ body:not(.role-client) [data-client-only] {
 
 .modal-body {
     padding: 1.35rem 1.5rem;
+    scroll-behavior: smooth;
+}
+
+.modal-dialog-scrollable .modal-body {
+    max-height: min(72vh, 760px);
+    overflow-y: auto;
 }
 
 .table {
@@ -387,6 +393,35 @@ body:not(.role-client) [data-client-only] {
     line-height: 1.28;
 }
 
+.admin-editor-panel {
+    padding: 1rem;
+    border: 1px solid var(--surface-border);
+    border-radius: 12px;
+    background: var(--accent-soft);
+}
+
+.inventory-editor {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.inventory-row {
+    display: grid;
+    grid-template-columns: minmax(190px, 1fr) minmax(120px, 160px) minmax(220px, 1.2fr);
+    gap: 0.75rem;
+    align-items: end;
+    padding: 0.85rem;
+    border: 1px solid var(--surface-border);
+    border-radius: 10px;
+    background: var(--surface);
+}
+
+.inventory-row .form-label {
+    margin-bottom: 0.25rem;
+    color: var(--text-muted);
+    font-weight: 650;
+}
+
 .report-metric-label {
     color: var(--text-muted);
     font-weight: 600;
@@ -493,6 +528,10 @@ html[data-theme="dark"] .table-hover > tbody > tr:hover > * {
     }
 
     .borrow-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .inventory-row {
         grid-template-columns: 1fr;
     }
 }

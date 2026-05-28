@@ -5,6 +5,17 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator
 
 
+class BookBranchFacultyPayload(BaseModel):
+    branch_id: int
+    copies_count: int = Field(default=0, ge=0)
+    faculty_ids: list[int] = Field(default_factory=list)
+
+
+class BranchInventoryPayload(BaseModel):
+    book_id: int
+    copies_count: int = Field(default=0, ge=0)
+
+
 class BookUpsertPayload(BaseModel):
     id_book: int | None = None
     title: str = Field(..., min_length=1, max_length=300)
@@ -14,6 +25,7 @@ class BookUpsertPayload(BaseModel):
     price: float | None = Field(default=None, ge=0)
     publisher_name: str | None = Field(default=None, max_length=200)
     authors: list[str] | None = None
+    branch_faculties: list[BookBranchFacultyPayload] | None = None
 
     @field_validator("title")
     @classmethod
@@ -44,6 +56,7 @@ class BookUpsertPayload(BaseModel):
 class BranchUpsertPayload(BaseModel):
     id_branch: int | None = None
     name: str = Field(..., min_length=1, max_length=200)
+    inventory: list[BranchInventoryPayload] | None = None
 
     @field_validator("name")
     @classmethod
@@ -64,6 +77,17 @@ class LoginPayload(BaseModel):
 class RegisterPayload(LoginPayload):
     full_name: str = Field(..., min_length=2, max_length=250)
     faculty_id: int | None = None
+
+    @field_validator("full_name")
+    @classmethod
+    def normalize_full_name(cls, value: str) -> str:
+        return value.strip()
+
+
+class ProfileUpdatePayload(BaseModel):
+    full_name: str = Field(..., min_length=2, max_length=250)
+    new_password: str | None = Field(default=None, min_length=6, max_length=100)
+    confirm_password: str | None = Field(default=None, min_length=6, max_length=100)
 
     @field_validator("full_name")
     @classmethod

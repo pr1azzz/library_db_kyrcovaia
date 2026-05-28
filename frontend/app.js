@@ -78,6 +78,15 @@ async function apiRequest(path, options = {}) {
     return payload;
 }
 
+function escapeHtml(value) {
+    return String(value ?? '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+}
+
 function formatMoney(value) {
     if (value === null || value === undefined || value === '') {
         return '-';
@@ -446,6 +455,10 @@ async function fetchBookAvailability(bookId) {
     return apiRequest(`/books/${bookId}/availability`);
 }
 
+async function fetchBookAdminDetails(bookId) {
+    return apiRequest(`/books/${bookId}/admin-details`);
+}
+
 async function fetchMyLoans() {
     return apiRequest('/loans/my');
 }
@@ -460,6 +473,21 @@ async function borrowBook(bookId, branchId) {
 async function saveFaculty(payload) {
     return apiRequest('/faculties', {
         method: 'POST',
+        body: JSON.stringify(payload),
+    });
+}
+
+async function deleteFaculty(facultyId) {
+    return apiRequest(`/faculties/${facultyId}`, { method: 'DELETE' });
+}
+
+async function fetchFacultyBooks(facultyId) {
+    return apiRequest(`/faculties/${facultyId}/books`);
+}
+
+async function updateProfile(payload) {
+    return apiRequest('/auth/me', {
+        method: 'PUT',
         body: JSON.stringify(payload),
     });
 }
@@ -500,7 +528,7 @@ async function getBookBranchAnalytics(bookTitle, branchName) {
         apiRequest(`/books/faculties${buildQuery({ title: bookTitle, branch: branchName })}`),
     ]);
 
-        return {
+    return {
         copiesCount: countData.copies_count ?? 0,
         facultiesCount: facultiesData.faculties_count ?? (facultiesData.faculties || []).length,
         faculties: facultiesData.faculties || [],
@@ -644,6 +672,7 @@ async function initBooksPage() {
         illustrations: document.getElementById('bookIllustrations'),
         publisher: document.getElementById('bookPublisher'),
         authors: document.getElementById('bookAuthors'),
+        branchFacultyEditor: document.getElementById('bookBranchFacultyEditor'),
     };
 
     const filters = {
@@ -677,10 +706,10 @@ async function initBooksPage() {
 
                 return `
                     <tr>
-                        <td>${book.title || '-'}</td>
-                        <td>${book.authors || '-'}</td>
+                        <td>${escapeHtml(book.title || '-')}</td>
+                        <td>${escapeHtml(book.authors || '-')}</td>
                         <td>${book.publication_year || '-'}</td>
-                        <td>${book.publisher_name || '-'}</td>
+                        <td>${escapeHtml(book.publisher_name || '-')}</td>
                         <td>${formatMoney(book.price)}</td>
                         <td class="text-end">${actions}</td>
                     </tr>
@@ -698,6 +727,71 @@ async function initBooksPage() {
         renderBooksTable();
     }
 
+    function renderBookBranchFacultyEditor(rows = []) {
+        if (!fields.branchFacultyEditor) {
+            return;
+        }
+
+        if (!state.branches.length) {
+            fields.branchFacultyEditor.innerHTML = '<div class="text-muted">Сначала добавьте филиалы.</div>';
+            return;
+        }
+
+        const byBranch = new Map(rows.map((row) => [Number(row.id_branch), row]));
+        fields.branchFacultyEditor.innerHTML = state.branches
+            .map((branch) => {
+                const row = byBranch.get(Number(branch.id_branch)) || {};
+                const selected = new Set((row.faculty_ids || []).map(Number));
+                const facultyOptions = state.faculties
+                    .map(
+                        (faculty) =>
+                            `<option value="${faculty.id_faculty}" ${selected.has(Number(faculty.id_faculty)) ? 'selected' : ''}>${escapeHtml(faculty.name)}</option>`,
+                    )
+                    .join('');
+
+                return `
+                    <div class="inventory-row" data-branch-id="${branch.id_branch}">
+                        <div>
+                            <div class="fw-semibold">${escapeHtml(branch.name)}</div>
+                            <div class="text-muted small">Филиал</div>
+                        </div>
+                        <div>
+                            <label class="form-label small">Экземпляров</label>
+                            <input class="form-control" type="number" min="0" value="${row.copies_count ?? 0}" data-role="copies">
+                        </div>
+                        <div>
+                            <label class="form-label small">Факультеты</label>
+                            <select class="form-select" multiple size="3" data-role="faculties">${facultyOptions}</select>
+                        </div>
+                    </div>
+                `;
+            })
+            .join('');
+    }
+
+    function collectBookBranchFaculties() {
+        if (!fields.branchFacultyEditor) {
+            return [];
+        }
+
+        return [...fields.branchFacultyEditor.querySelectorAll('.inventory-row')].map((row) => ({
+            branch_id: Number(row.dataset.branchId),
+            copies_count: Number(row.querySelector('[data-role="copies"]')?.value || 0),
+            faculty_ids: [...row.querySelectorAll('[data-role="faculties"] option:checked')].map((option) =>
+                Number(option.value),
+            ),
+        }));
+    }
+
+    async function ensureBookAdminOptions() {
+        if (!isAdmin()) {
+            return;
+        }
+        const [branches, faculties] = await Promise.all([fetchBranches(), fetchFaculties()]);
+        state.branches = branches;
+        state.faculties = faculties;
+    }
+
     function openBookModalForCreate() {
         if (!fields.modalTitle) {
             return;
@@ -712,15 +806,17 @@ async function initBooksPage() {
         fields.illustrations.value = '';
         fields.publisher.value = '';
         fields.authors.value = '';
+        renderBookBranchFacultyEditor([]);
     }
 
-    function openBookModalForEdit(bookId) {
+    async function openBookModalForEdit(bookId) {
         const book = state.books.find((item) => Number(item.id_book) === Number(bookId));
         if (!book) {
             showToast('Книга для редактирования не найдена', 'danger');
             return;
         }
 
+        const details = await fetchBookAdminDetails(bookId);
         fields.modalTitle.textContent = 'Редактировать книгу';
         fields.id.value = book.id_book;
         fields.title.value = book.title || '';
@@ -730,6 +826,7 @@ async function initBooksPage() {
         fields.illustrations.value = book.illustrations_count ?? '';
         fields.publisher.value = book.publisher_name || '';
         fields.authors.value = book.authors || '';
+        renderBookBranchFacultyEditor(details.branches || []);
 
         if (bookModal) {
             bookModal.show();
@@ -751,6 +848,7 @@ async function initBooksPage() {
                 .split(',')
                 .map((name) => name.trim())
                 .filter(Boolean),
+            branch_faculties: isAdmin() ? collectBookBranchFaculties() : null,
         };
 
         await apiRequest('/books', {
@@ -778,7 +876,17 @@ async function initBooksPage() {
     }
 
     if (addBookBtn) {
-        addBookBtn.addEventListener('click', openBookModalForCreate);
+        addBookBtn.addEventListener('click', async () => {
+            try {
+                await ensureBookAdminOptions();
+                openBookModalForCreate();
+                if (bookModal) {
+                    bookModal.show();
+                }
+            } catch (error) {
+                showToast(error.message, 'danger');
+            }
+        });
     }
 
     if (bookForm) {
@@ -818,7 +926,8 @@ async function initBooksPage() {
 
             try {
                 if (action === 'edit-book') {
-                    openBookModalForEdit(id);
+                    await ensureBookAdminOptions();
+                    await openBookModalForEdit(id);
                 } else if (action === 'delete-book') {
                     await deleteBook(id);
                 } else if (action === 'borrow-book') {
@@ -877,6 +986,9 @@ async function initBranchesPage() {
         copiesValue: document.getElementById('branchModalCopiesValue'),
         facultiesCountValue: document.getElementById('branchModalFacultiesCountValue'),
         facultiesBody: document.querySelector('#branchModalFacultiesTable tbody'),
+        branchInventoryEditor: document.getElementById('branchInventoryEditor'),
+        facultyBooksTitle: document.getElementById('facultyBooksTitle'),
+        facultyBooksBody: document.querySelector('#facultyBooksTable tbody'),
         facultyId: document.getElementById('facultyId'),
         facultyName: document.getElementById('facultyName'),
     };
@@ -936,7 +1048,9 @@ async function initBranchesPage() {
                     <tr>
                         <td>${faculty.name}</td>
                         <td class="text-end">
-                            <button class="btn btn-sm btn-outline-primary" data-action="edit-faculty" data-id="${faculty.id_faculty}" data-name="${faculty.name}">Редактировать</button>
+                            <button class="btn btn-sm btn-outline-secondary me-1" data-action="view-faculty-books" data-id="${faculty.id_faculty}" data-name="${escapeHtml(faculty.name)}">Книги</button>
+                            <button class="btn btn-sm btn-outline-primary me-1" data-action="edit-faculty" data-id="${faculty.id_faculty}" data-name="${escapeHtml(faculty.name)}">Редактировать</button>
+                            <button class="btn btn-sm btn-outline-danger" data-action="delete-faculty" data-id="${faculty.id_faculty}">Удалить</button>
                         </td>
                     </tr>
                 `,
@@ -949,22 +1063,73 @@ async function initBranchesPage() {
         renderFacultiesAdminTable();
     }
 
+    function renderBranchInventoryEditor(inventory = []) {
+        if (!fields.branchInventoryEditor) {
+            return;
+        }
+
+        if (!state.books.length) {
+            fields.branchInventoryEditor.innerHTML = '<div class="text-muted">Сначала добавьте книги.</div>';
+            return;
+        }
+
+        const byBook = new Map(inventory.map((item) => [Number(item.id_book), item]));
+        fields.branchInventoryEditor.innerHTML = state.books
+            .map((book) => {
+                const item = byBook.get(Number(book.id_book)) || {};
+                return `
+                    <div class="inventory-row" data-book-id="${book.id_book}">
+                        <div>
+                            <div class="fw-semibold">${escapeHtml(book.title)}</div>
+                            <div class="text-muted small">Книга</div>
+                        </div>
+                        <div>
+                            <label class="form-label small">Экземпляров</label>
+                            <input class="form-control" type="number" min="0" value="${item.copies_count ?? 0}" data-role="copies">
+                        </div>
+                    </div>
+                `;
+            })
+            .join('');
+    }
+
+    function collectBranchInventory() {
+        if (!fields.branchInventoryEditor) {
+            return [];
+        }
+
+        return [...fields.branchInventoryEditor.querySelectorAll('.inventory-row')].map((row) => ({
+            book_id: Number(row.dataset.bookId),
+            copies_count: Number(row.querySelector('[data-role="copies"]')?.value || 0),
+        }));
+    }
+
+    async function ensureBranchAdminOptions() {
+        if (!isAdmin()) {
+            return;
+        }
+        state.books = await fetchBookOptions();
+    }
+
     function openBranchModalForCreate() {
         fields.modalTitle.textContent = 'Добавить филиал';
         fields.id.value = '';
         fields.name.value = '';
+        renderBranchInventoryEditor([]);
     }
 
-    function openBranchModalForEdit(branchId) {
+    async function openBranchModalForEdit(branchId) {
         const branch = state.branches.find((item) => Number(item.id_branch) === Number(branchId));
         if (!branch) {
             showToast('Филиал для редактирования не найден', 'danger');
             return;
         }
 
+        const details = await fetchBranchInventory(branchId);
         fields.modalTitle.textContent = 'Редактировать филиал';
         fields.id.value = branch.id_branch;
         fields.name.value = branch.name;
+        renderBranchInventoryEditor(details.inventory || []);
         if (branchModal) {
             branchModal.show();
         }
@@ -976,6 +1141,7 @@ async function initBranchesPage() {
         const payload = {
             id_branch: fields.id.value ? Number(fields.id.value) : null,
             name: fields.name.value.trim(),
+            inventory: isAdmin() ? collectBranchInventory() : null,
         };
 
         await apiRequest('/branches', {
@@ -1012,6 +1178,40 @@ async function initBranchesPage() {
         await apiRequest(`/branches/${branchId}`, { method: 'DELETE' });
         showToast('Филиал удален', 'success');
         await loadBranches();
+    }
+
+    async function deleteFacultyById(facultyId) {
+        const confirmed = window.confirm('Удалить факультет? Если он используется в книгах или пользователях, база запретит удаление.');
+        if (!confirmed) {
+            return;
+        }
+
+        await deleteFaculty(facultyId);
+        showToast('Факультет удален', 'success');
+        await loadFacultiesAdmin();
+    }
+
+    async function openFacultyBooksModal(facultyId, facultyName) {
+        const rows = await fetchFacultyBooks(facultyId);
+        fields.facultyBooksTitle.textContent = `Книги факультета: ${facultyName}`;
+
+        if (!rows.length) {
+            fields.facultyBooksBody.innerHTML = '<tr><td colspan="3" class="text-center text-muted py-3">Книги не привязаны</td></tr>';
+        } else {
+            fields.facultyBooksBody.innerHTML = rows
+                .map(
+                    (row) => `
+                        <tr>
+                            <td>${escapeHtml(row.title)}</td>
+                            <td>${escapeHtml(row.branch_name)}</td>
+                            <td>${row.copies_count ?? 0}</td>
+                        </tr>
+                    `,
+                )
+                .join('');
+        }
+
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('facultyBooksModal')).show();
     }
 
     async function loadBranchDetails(branchId) {
@@ -1077,7 +1277,17 @@ async function initBranchesPage() {
     }
 
     if (addBranchBtn) {
-        addBranchBtn.addEventListener('click', openBranchModalForCreate);
+        addBranchBtn.addEventListener('click', async () => {
+            try {
+                await ensureBranchAdminOptions();
+                openBranchModalForCreate();
+                if (branchModal) {
+                    branchModal.show();
+                }
+            } catch (error) {
+                showToast(error.message, 'danger');
+            }
+        });
     }
 
     if (branchForm) {
@@ -1122,7 +1332,8 @@ async function initBranchesPage() {
 
             try {
                 if (action === 'edit-branch') {
-                    openBranchModalForEdit(id);
+                    await ensureBranchAdminOptions();
+                    await openBranchModalForEdit(id);
                 } else if (action === 'delete-branch') {
                     await deleteBranch(id);
                 } else if (action === 'view-branch') {
@@ -1135,15 +1346,25 @@ async function initBranchesPage() {
     }
 
     if (facultiesTableBody) {
-        facultiesTableBody.addEventListener('click', (event) => {
-            const button = event.target.closest('button[data-action="edit-faculty"]');
+        facultiesTableBody.addEventListener('click', async (event) => {
+            const button = event.target.closest('button[data-action]');
             if (!button) {
                 return;
             }
 
-            fields.facultyId.value = button.dataset.id;
-            fields.facultyName.value = button.dataset.name || '';
-            fields.facultyName.focus();
+            try {
+                if (button.dataset.action === 'edit-faculty') {
+                    fields.facultyId.value = button.dataset.id;
+                    fields.facultyName.value = button.dataset.name || '';
+                    fields.facultyName.focus();
+                } else if (button.dataset.action === 'delete-faculty') {
+                    await deleteFacultyById(button.dataset.id);
+                } else if (button.dataset.action === 'view-faculty-books') {
+                    await openFacultyBooksModal(button.dataset.id, button.dataset.name || '');
+                }
+            } catch (error) {
+                showToast(error.message, 'danger');
+            }
         });
     }
 
@@ -1300,6 +1521,10 @@ async function initAccountPage() {
     const loansBody = document.querySelector('#accountLoansTable tbody');
     const requestsBody = document.querySelector('#accountRequestsTable tbody');
     const pendingRequestsBody = document.querySelector('#pendingRequestsTable tbody');
+    const profileForm = document.getElementById('profileForm');
+    const profileFullName = document.getElementById('profileFullName');
+    const profilePassword = document.getElementById('profilePassword');
+    const profilePasswordConfirm = document.getElementById('profilePasswordConfirm');
 
     if (!state.user) {
         profileBlock.innerHTML = '<p class="mb-3">Войдите или зарегистрируйтесь, чтобы видеть личный кабинет.</p><button id="accountLoginBtn" class="btn btn-primary" type="button">Войти</button>';
@@ -1325,6 +1550,40 @@ async function initAccountPage() {
             </div>
         </div>
     `;
+    if (profileFullName) {
+        profileFullName.value = state.user.full_name || '';
+    }
+
+    if (profileForm && !profileForm.dataset.handlerAttached) {
+        profileForm.dataset.handlerAttached = 'true';
+        profileForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            const newPassword = profilePassword.value.trim();
+            const confirmPassword = profilePasswordConfirm.value.trim();
+
+            if (newPassword !== confirmPassword) {
+                showToast('Пароли не совпадают', 'danger');
+                return;
+            }
+
+            try {
+                const result = await updateProfile({
+                    full_name: profileFullName.value.trim(),
+                    new_password: newPassword || null,
+                    confirm_password: confirmPassword || null,
+                });
+                state.user = result.user;
+                localStorage.setItem('library-user', JSON.stringify(result.user));
+                renderAuthUI();
+                profilePassword.value = '';
+                profilePasswordConfirm.value = '';
+                profileBlock.querySelector('.fw-semibold').textContent = result.user.full_name;
+                showToast('Профиль обновлен', 'success');
+            } catch (error) {
+                showToast(error.message, 'danger');
+            }
+        });
+    }
 
     try {
         // Загрузить историю выдач

@@ -24,6 +24,7 @@ from .schemas import (
     LoanRequestCreatePayload,
     LoanRequestApprovalPayload,
     LoginPayload,
+    ProfileUpdatePayload,
     RegisterPayload,
 )
 
@@ -249,6 +250,60 @@ def get_me(user: dict[str, Any] = Depends(require_user)) -> dict[str, Any]:
     return user
 
 
+@app.put("/api/auth/me")
+def update_me(
+    payload: ProfileUpdatePayload,
+    user: dict[str, Any] = Depends(require_user),
+    connection: psycopg.Connection = Depends(get_connection),
+) -> dict[str, Any]:
+    if bool(payload.new_password) != bool(payload.confirm_password):
+        raise HTTPException(status_code=400, detail="Введите новый пароль и подтверждение")
+    if payload.new_password and payload.new_password != payload.confirm_password:
+        raise HTTPException(status_code=400, detail="Пароли не совпадают")
+
+    try:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            if payload.new_password:
+                salt = secrets.token_hex(16)
+                password_hash = hash_password(payload.new_password, salt)
+                cursor.execute(
+                    """
+                    UPDATE app_users
+                       SET full_name = %s,
+                           password_salt = %s,
+                           password_hash = %s
+                     WHERE id_user = %s
+                    """,
+                    (payload.full_name, salt, password_hash, user["id_user"]),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE app_users
+                       SET full_name = %s
+                     WHERE id_user = %s
+                    """,
+                    (payload.full_name, user["id_user"]),
+                )
+
+            cursor.execute(
+                """
+                SELECT u.id_user, u.full_name, u.email, u.role, u.id_faculty, f.name AS faculty_name
+                FROM app_users u
+                LEFT JOIN faculties f ON f.id_faculty = u.id_faculty
+                WHERE u.id_user = %s
+                """,
+                (user["id_user"],),
+            )
+            row = cursor.fetchone()
+
+        connection.commit()
+        return {"message": "Профиль обновлен", "user": public_user(row)}
+    except psycopg.Error as exc:
+        connection.rollback()
+        raise_http_from_db_error(exc)
+
+
 @app.get("/api/faculties")
 def list_faculties(connection: psycopg.Connection = Depends(get_connection)) -> list[dict[str, Any]]:
     try:
@@ -298,6 +353,59 @@ def add_or_update_faculty(
 
         connection.commit()
         return {"message": "Факультет сохранен", "id_faculty": int(row["id_faculty"])}
+    except psycopg.Error as exc:
+        connection.rollback()
+        raise_http_from_db_error(exc)
+
+
+@app.get("/api/faculties/{faculty_id}/books")
+def get_faculty_books(
+    faculty_id: int,
+    _admin: dict[str, Any] = Depends(require_admin),
+    connection: psycopg.Connection = Depends(get_connection),
+) -> list[dict[str, Any]]:
+    try:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute("SELECT 1 FROM faculties WHERE id_faculty = %s", (faculty_id,))
+            if cursor.fetchone() is None:
+                raise HTTPException(status_code=404, detail="Факультет не найден")
+
+            cursor.execute(
+                """
+                SELECT
+                    b.id_book,
+                    b.title,
+                    br.name AS branch_name,
+                    COALESCE(i.copies_count, 0)::INTEGER AS copies_count
+                FROM book_faculty bf
+                JOIN books b ON b.id_book = bf.id_book
+                JOIN branches br ON br.id_branch = bf.id_branch
+                LEFT JOIN inventory i ON i.id_book = bf.id_book AND i.id_branch = bf.id_branch
+                WHERE bf.id_faculty = %s
+                ORDER BY b.title, br.name
+                """,
+                (faculty_id,),
+            )
+            return [normalize_record(row) for row in cursor.fetchall()]
+    except psycopg.Error as exc:
+        raise_http_from_db_error(exc)
+
+
+@app.delete("/api/faculties/{faculty_id}")
+def delete_faculty(
+    faculty_id: int,
+    _admin: dict[str, Any] = Depends(require_admin),
+    connection: psycopg.Connection = Depends(get_connection),
+) -> dict[str, str]:
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM faculties WHERE id_faculty = %s", (faculty_id,))
+            if cursor.rowcount == 0:
+                connection.rollback()
+                raise HTTPException(status_code=404, detail="Факультет не найден")
+
+        connection.commit()
+        return {"message": "Факультет удален"}
     except psycopg.Error as exc:
         connection.rollback()
         raise_http_from_db_error(exc)
@@ -516,6 +624,49 @@ def get_book_availability(
         raise_http_from_db_error(exc)
 
 
+@app.get("/api/books/{book_id}/admin-details")
+def get_book_admin_details(
+    book_id: int,
+    _admin: dict[str, Any] = Depends(require_admin),
+    connection: psycopg.Connection = Depends(get_connection),
+) -> dict[str, Any]:
+    try:
+        with connection.cursor(row_factory=dict_row) as cursor:
+            cursor.execute("SELECT id_book, title FROM books WHERE id_book = %s", (book_id,))
+            book_row = cursor.fetchone()
+            if book_row is None:
+                raise HTTPException(status_code=404, detail="Книга не найдена")
+
+            cursor.execute(
+                """
+                SELECT
+                    br.id_branch,
+                    br.name AS branch_name,
+                    COALESCE(i.copies_count, 0)::INTEGER AS copies_count,
+                    COALESCE(i.times_issued, 0)::INTEGER AS times_issued,
+                    COALESCE(
+                        array_agg(bf.id_faculty ORDER BY f.name) FILTER (WHERE bf.id_faculty IS NOT NULL),
+                        ARRAY[]::BIGINT[]
+                    ) AS faculty_ids
+                FROM branches br
+                LEFT JOIN inventory i ON i.id_branch = br.id_branch AND i.id_book = %s
+                LEFT JOIN book_faculty bf ON bf.id_branch = br.id_branch AND bf.id_book = %s
+                LEFT JOIN faculties f ON f.id_faculty = bf.id_faculty
+                GROUP BY br.id_branch, br.name, i.copies_count, i.times_issued
+                ORDER BY br.name
+                """,
+                (book_id, book_id),
+            )
+            branch_rows = cursor.fetchall()
+
+        return {
+            "book": normalize_record(book_row),
+            "branches": [normalize_record(row) for row in branch_rows],
+        }
+    except psycopg.Error as exc:
+        raise_http_from_db_error(exc)
+
+
 @app.post("/api/books")
 def add_or_update_book(
     payload: BookUpsertPayload,
@@ -589,6 +740,39 @@ def add_or_update_book(
                         """,
                         (book_id, int(author_row["id_author"])),
                     )
+
+            if payload.branch_faculties is not None:
+                for item in payload.branch_faculties:
+                    if item.copies_count > 0:
+                        cursor.execute(
+                            """
+                            INSERT INTO inventory(id_book, id_branch, copies_count, times_issued)
+                            VALUES (%s, %s, %s, 0)
+                            ON CONFLICT (id_book, id_branch)
+                            DO UPDATE SET copies_count = EXCLUDED.copies_count
+                            """,
+                            (book_id, item.branch_id, item.copies_count),
+                        )
+                    else:
+                        cursor.execute(
+                            "DELETE FROM inventory WHERE id_book = %s AND id_branch = %s",
+                            (book_id, item.branch_id),
+                        )
+
+                    cursor.execute(
+                        "DELETE FROM book_faculty WHERE id_book = %s AND id_branch = %s",
+                        (book_id, item.branch_id),
+                    )
+                    if item.copies_count > 0:
+                        for faculty_id in sorted(set(item.faculty_ids)):
+                            cursor.execute(
+                                """
+                                INSERT INTO book_faculty(id_book, id_branch, id_faculty)
+                                VALUES (%s, %s, %s)
+                                ON CONFLICT (id_book, id_branch, id_faculty) DO NOTHING
+                                """,
+                                (book_id, item.branch_id, faculty_id),
+                            )
 
         connection.commit()
         return {
@@ -726,6 +910,28 @@ def add_or_update_branch(
 
             row = normalize_record(row)
             branch_id = int(row["id_branch"])
+
+            if payload.inventory is not None:
+                for item in payload.inventory:
+                    if item.copies_count > 0:
+                        cursor.execute(
+                            """
+                            INSERT INTO inventory(id_book, id_branch, copies_count, times_issued)
+                            VALUES (%s, %s, %s, 0)
+                            ON CONFLICT (id_book, id_branch)
+                            DO UPDATE SET copies_count = EXCLUDED.copies_count
+                            """,
+                            (item.book_id, branch_id, item.copies_count),
+                        )
+                    else:
+                        cursor.execute(
+                            "DELETE FROM inventory WHERE id_book = %s AND id_branch = %s",
+                            (item.book_id, branch_id),
+                        )
+                        cursor.execute(
+                            "DELETE FROM book_faculty WHERE id_book = %s AND id_branch = %s",
+                            (item.book_id, branch_id),
+                        )
 
         connection.commit()
         return {
