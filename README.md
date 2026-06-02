@@ -159,6 +159,32 @@ Swagger API:  http://localhost:8000/docs
 pgAdmin:     http://localhost:5050
 ```
 
+## Тесты
+
+В проект добавлены быстрые тесты без зависимости от живой PostgreSQL:
+
+- backend: проверка Pydantic-схем, нормализации API-ответов, хеширования паролей и базового health-контракта;
+- frontend: проверка синтаксиса `frontend/app.js`, ключевых элементов интерфейса, PWA/service worker и логики фильтров/статусов.
+
+Установить dev-зависимости:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+Запустить все тесты:
+
+```bash
+python -m pytest
+```
+
+Быстрая ручная проверка синтаксиса, если не нужен полный pytest:
+
+```bash
+python -m py_compile backend/app/main.py backend/app/schemas.py
+node --check frontend/app.js
+```
+
 Доступ к pgAdmin в браузере:
 
 ```text

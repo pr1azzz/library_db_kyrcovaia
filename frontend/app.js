@@ -12,11 +12,18 @@ const state = {
 const toastEl = document.getElementById('appToast');
 const toastBody = document.getElementById('appToastBody');
 const toastInstance = toastEl ? new bootstrap.Toast(toastEl, { delay: 3800 }) : null;
+let lastToast = { message: '', shownAt: 0 };
 
 function showToast(message, variant = 'info') {
     if (!toastEl || !toastBody || !toastInstance) {
         return;
     }
+
+    const now = Date.now();
+    if (message === lastToast.message && now - lastToast.shownAt < 5000) {
+        return;
+    }
+    lastToast = { message, shownAt: now };
 
     const variants = {
         info: { bg: '#184660', color: '#ffffff' },
@@ -54,10 +61,18 @@ async function apiRequest(path, options = {}) {
         headers['X-User-Id'] = String(state.user.id_user);
     }
 
-    const response = await fetch(`${apiBase}${path}`, {
-        headers,
-        ...options,
-    });
+    let response;
+    try {
+        response = await fetch(`${apiBase}${path}`, {
+            headers,
+            ...options,
+        });
+    } catch (error) {
+        const offlineHint = navigator.onLine === false
+            ? 'В DevTools включен Offline. Откройте Network и выберите No throttling/Online.'
+            : 'Не удалось подключиться к API. Проверьте, что Docker и http://localhost:8000 запущены.';
+        throw new Error(offlineHint);
+    }
 
     const rawText = await response.text();
     let payload = null;
@@ -127,6 +142,24 @@ function formatMoscowDate(value) {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
+    }).format(date);
+}
+
+function normalizeSearchText(value) {
+    return String(value ?? '').trim().toLowerCase();
+}
+
+function moscowDateKey(value) {
+    const date = parseDbDate(value);
+    if (!date || Number.isNaN(date.getTime())) {
+        return '';
+    }
+
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Europe/Moscow',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
     }).format(date);
 }
 
@@ -1042,6 +1075,7 @@ async function initBranchesPage() {
 
     const branchDetailsModalEl = document.getElementById('branchDetailsModal');
     const branchDetailsModal = branchDetailsModalEl ? new bootstrap.Modal(branchDetailsModalEl) : null;
+    let branchBookInputSource = 'select';
 
     const fields = {
         modalTitle: document.getElementById('branchModalTitle'),
@@ -1050,6 +1084,8 @@ async function initBranchesPage() {
         detailsTitle: document.getElementById('branchDetailsTitle'),
         inventoryBody: document.querySelector('#branchInventoryTable tbody'),
         bookSelect: document.getElementById('branchBookSelect'),
+        bookSearch: document.getElementById('branchBookSearch'),
+        bookSuggestions: document.getElementById('branchBookSuggestions'),
         analyticsForm: document.getElementById('branchAnalyticsForm'),
         copiesValue: document.getElementById('branchModalCopiesValue'),
         facultiesCountValue: document.getElementById('branchModalFacultiesCountValue'),
@@ -1310,6 +1346,15 @@ async function initBranchesPage() {
             inventory.map((item) => ({ value: item.id_book, label: item.title })),
             'Выберите книгу',
         );
+        if (fields.bookSuggestions) {
+            fields.bookSuggestions.innerHTML = inventory
+                .map((item) => `<option value="${escapeHtml(item.title)}"></option>`)
+                .join('');
+        }
+        if (fields.bookSearch) {
+            fields.bookSearch.value = '';
+        }
+        branchBookInputSource = 'select';
 
         fields.copiesValue.textContent = '-';
         if (fields.facultiesCountValue) fields.facultiesCountValue.textContent = '-';
@@ -1323,20 +1368,38 @@ async function initBranchesPage() {
     async function submitBranchAnalyticsForm(event) {
         event.preventDefault();
 
+        if (!state.branchDetails) {
+            showToast('Сначала откройте филиал', 'info');
+            return;
+        }
+
+        const inventory = state.branchDetails.inventory || [];
+        const searchValue = normalizeSearchText(fields.bookSearch?.value || '');
         const selectedBookId = fields.bookSelect.value;
-        if (!selectedBookId || !state.branchDetails) {
+        let selectedBook = null;
+
+        if (branchBookInputSource === 'search' && searchValue) {
+            selectedBook =
+                inventory.find((item) => normalizeSearchText(item.title) === searchValue) ||
+                inventory.find((item) => normalizeSearchText(item.title).includes(searchValue));
+        }
+
+        if (!selectedBook && selectedBookId) {
+            selectedBook = inventory.find((item) => Number(item.id_book) === Number(selectedBookId));
+        }
+
+        if (!selectedBook) {
             showToast('Сначала выберите книгу', 'info');
             return;
         }
 
-        const selectedBook = (state.branchDetails.inventory || []).find(
-            (item) => Number(item.id_book) === Number(selectedBookId),
-        );
-
-        if (!selectedBook) {
-            showToast('Книга не найдена в инвентаре филиала', 'danger');
-            return;
+        if (fields.bookSelect) {
+            fields.bookSelect.value = selectedBook.id_book;
         }
+        if (fields.bookSearch) {
+            fields.bookSearch.value = selectedBook.title;
+        }
+        branchBookInputSource = 'select';
 
         const analytics = await getBookBranchAnalytics(selectedBook.title, state.branchDetails.branch.name);
         fields.copiesValue.textContent = analytics.copiesCount;
@@ -1384,6 +1447,28 @@ async function initBranchesPage() {
                 await submitBranchAnalyticsForm(event);
             } catch (error) {
                 showToast(error.message, 'danger');
+            }
+        });
+    }
+
+    if (fields.bookSearch) {
+        fields.bookSearch.addEventListener('input', () => {
+            branchBookInputSource = 'search';
+            const inventory = state.branchDetails?.inventory || [];
+            const value = normalizeSearchText(fields.bookSearch.value);
+            const exactMatch = inventory.find((item) => normalizeSearchText(item.title) === value);
+            if (exactMatch && fields.bookSelect) {
+                fields.bookSelect.value = exactMatch.id_book;
+            }
+        });
+    }
+
+    if (fields.bookSelect) {
+        fields.bookSelect.addEventListener('change', () => {
+            branchBookInputSource = 'select';
+            const selectedOption = fields.bookSelect.options[fields.bookSelect.selectedIndex];
+            if (fields.bookSearch) {
+                fields.bookSearch.value = selectedOption?.value ? selectedOption.textContent : '';
             }
         });
     }
@@ -1595,6 +1680,10 @@ async function initAccountPage() {
     const profileFullName = document.getElementById('profileFullName');
     const profilePassword = document.getElementById('profilePassword');
     const profilePasswordConfirm = document.getElementById('profilePasswordConfirm');
+    const requestStudentFilter = document.getElementById('requestStudentFilter');
+    const requestDateFrom = document.getElementById('requestDateFrom');
+    const requestDateTo = document.getElementById('requestDateTo');
+    const requestFilterReset = document.getElementById('requestFilterReset');
 
     function requestTypeLabel(type) {
         return type === 'return' ? 'Возврат' : 'Получение';
@@ -1616,6 +1705,20 @@ async function initAccountPage() {
             returned: 'bg-success',
         };
         return `<span class="badge ${classes[status] || 'bg-secondary'}">${labels[status] || status}</span>`;
+    }
+
+    function filterAdminRequests(requests) {
+        const studentQuery = normalizeSearchText(requestStudentFilter?.value || '');
+        const dateFrom = requestDateFrom?.value || '';
+        const dateTo = requestDateTo?.value || '';
+
+        return requests.filter((request) => {
+            const studentMatches = !studentQuery || normalizeSearchText(request.full_name).includes(studentQuery);
+            const requestDate = moscowDateKey(request.created_at);
+            const fromMatches = !dateFrom || requestDate >= dateFrom;
+            const toMatches = !dateTo || requestDate <= dateTo;
+            return studentMatches && fromMatches && toMatches;
+        });
     }
 
     if (!state.user) {
@@ -1679,6 +1782,25 @@ async function initAccountPage() {
         });
     }
 
+    if (isAdmin() && requestFilterReset && !requestFilterReset.dataset.handlerAttached) {
+        requestFilterReset.dataset.handlerAttached = 'true';
+        requestFilterReset.addEventListener('click', async () => {
+            if (requestStudentFilter) requestStudentFilter.value = '';
+            if (requestDateFrom) requestDateFrom.value = '';
+            if (requestDateTo) requestDateTo.value = '';
+            await initAccountPage();
+        });
+    }
+
+    [requestStudentFilter, requestDateFrom, requestDateTo].forEach((input) => {
+        if (input && !input.dataset.handlerAttached) {
+            input.dataset.handlerAttached = 'true';
+            input.addEventListener('input', async () => {
+                await initAccountPage();
+            });
+        }
+    });
+
     try {
         if (isAdmin()) {
             if (historyTitle) {
@@ -1700,7 +1822,7 @@ async function initAccountPage() {
             }
 
             // У администратора история строится по всем заявкам, чтобы видеть ожидание, одобрение и отказ.
-            const allRequests = await fetchAllLoanRequests();
+            const allRequests = filterAdminRequests(await fetchAllLoanRequests());
             if (!allRequests.length) {
                 loansBody.innerHTML = '<tr><td colspan="8" class="text-center text-muted py-3">История запросов пуста</td></tr>';
             } else {
@@ -1736,6 +1858,7 @@ async function initAccountPage() {
                     .filter((request) => request.request_type === 'return' && request.status === 'pending')
                     .map((request) => `${request.id_book}|${request.id_branch}`),
             );
+            const renderedReturnPendingKeys = new Set();
             const rows = [];
 
             loans.forEach((loan) => {
@@ -1747,6 +1870,7 @@ async function initAccountPage() {
                     statusCell = `${statusBadge('returned')}<br><span class="text-muted small">${formatMoscowDate(loan.returned_at)}</span>`;
                 } else if (waitingReturn) {
                     statusCell = statusBadge('pending', 'return');
+                    renderedReturnPendingKeys.add(key);
                 } else {
                     statusCell = `${statusBadge('on_hand')} <button class="btn btn-sm btn-outline-primary ms-2" type="button" data-action="request-return" data-book-id="${loan.id_book}" data-branch-id="${loan.id_branch}">Вернуть</button>`;
                 }
@@ -1766,7 +1890,10 @@ async function initAccountPage() {
             });
 
             requests
-                .filter((request) => request.status !== 'approved')
+                .filter((request) => {
+                    const key = `${request.id_book}|${request.id_branch}`;
+                    return request.status !== 'approved' && !(request.request_type === 'return' && renderedReturnPendingKeys.has(key));
+                })
                 .forEach((request) => {
                     rows.push({
                         date: request.created_at,
@@ -1853,6 +1980,25 @@ async function initAccountPage() {
         }
     } catch (error) {
         showToast(`Ошибка загрузки кабинета: ${error.message}`, 'danger');
+    }
+
+    if (!window.accountRefreshTimer) {
+        window.accountRefreshTimer = setInterval(async () => {
+            if (currentPage !== 'account' || document.hidden || window.accountRefreshInProgress) {
+                return;
+            }
+
+            if (document.activeElement?.closest('#profileForm')) {
+                return;
+            }
+
+            try {
+                window.accountRefreshInProgress = true;
+                await initAccountPage();
+            } finally {
+                window.accountRefreshInProgress = false;
+            }
+        }, 10000);
     }
 }
 

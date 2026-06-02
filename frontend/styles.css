@@ -461,6 +461,24 @@ body:not(.role-client) [data-client-only] {
     font-size: 1.25rem;
 }
 
+.request-filter {
+    display: grid !important;
+    grid-template-columns: minmax(220px, 1.4fr) minmax(145px, 0.8fr) minmax(145px, 0.8fr) minmax(96px, auto);
+    gap: 0.5rem;
+    max-width: 860px;
+    width: 100%;
+}
+
+.request-filter > [class*="col-"] {
+    width: auto;
+    max-width: none;
+    padding: 0;
+}
+
+.request-filter .btn {
+    min-width: 96px;
+}
+
 .text-muted {
     color: var(--text-muted) !important;
 }
@@ -560,6 +578,104 @@ html[data-theme="dark"] .table-hover > tbody > tr:hover > * {
     }
 
     .inventory-row {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 575px) {
+    .topbar .container-fluid {
+        padding: 0.85rem 0.9rem !important;
+    }
+
+    .main-content {
+        padding: 1rem 0.75rem;
+    }
+
+    .section-card,
+    .stat-card {
+        border-radius: 10px;
+    }
+
+    .card-body {
+        padding: 0.95rem;
+    }
+
+    .page-title {
+        font-size: 1.35rem;
+    }
+
+    .header-tools,
+    .auth-box {
+        width: 100%;
+    }
+
+    .auth-user {
+        width: 100%;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .nav-compact {
+        width: 100%;
+        padding-bottom: 0.15rem;
+    }
+
+    .nav-compact .nav-link {
+        padding: 0.5rem 0.58rem;
+        font-size: 0.88rem;
+    }
+
+    .modal-dialog,
+    .modal-lg,
+    .modal-xl {
+        max-width: calc(100% - 0.75rem);
+        margin: 0.375rem auto;
+    }
+
+    .modal-header,
+    .modal-footer,
+    .modal-body {
+        padding: 0.9rem;
+    }
+
+    .modal-footer {
+        align-items: stretch;
+        flex-direction: column-reverse;
+    }
+
+    .modal-footer .btn {
+        width: 100%;
+    }
+
+    .table-responsive {
+        margin-inline: -0.15rem;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .table {
+        min-width: 680px;
+    }
+
+    .table-sm {
+        min-width: 520px;
+    }
+
+    .request-filter {
+        grid-template-columns: 1fr;
+        max-width: none;
+        width: 100%;
+    }
+
+    .report-metric {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 0.25rem;
+    }
+
+    .book-details-grid,
+    .availability-grid,
+    .faculty-check-list {
         grid-template-columns: 1fr;
     }
 }
