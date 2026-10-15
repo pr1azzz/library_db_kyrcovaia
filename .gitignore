@@ -5,7 +5,6 @@ __pycache__/
 *.pyd
 .venv/
 venv/
-
 # Environment
 backend/.env
 

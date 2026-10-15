@@ -206,11 +206,13 @@ Password: pgadmin123
 
 ```text
 Host: 127.0.0.1
-Port: 5432
+Port: 5433
 Maintenance database: library_db
 Username: pgadmin_user
 Password: pgadmin123
 ```
+
+> Если на Windows уже запущен локальный PostgreSQL на порту `5432`, Docker пробрасывает БД проекта на **5433**. Внутри Docker-сети приложение по-прежнему подключается к `postgres:5432`.
 
 ## Запуск без Docker
 
